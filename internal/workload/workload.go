@@ -85,6 +85,14 @@ type Workload interface {
 	// che devono leggere Probe e Resources per-container: un DTO dedicato
 	// aggiungerebbe indirezione senza nascondere dettagli Kubernetes.
 	PodContainers() []corev1.Container
+	// ImagePullSecretNames espone i nomi dei secret dichiarati direttamente
+	// nel pod template. I secret ereditati dal ServiceAccount richiedono una
+	// lettura cluster e restano responsabilita' del check che ne ha bisogno.
+	ImagePullSecretNames() []string
+	// ServiceAccountName espone il nome dichiarato nel pod template. Una
+	// stringa vuota indica il ServiceAccount Kubernetes "default": il getter
+	// non applica il default per lasciare questa decisione visibile al chiamante.
+	ServiceAccountName() string
 	// RolloutComplete riporta se il rollout e' concluso con successo:
 	// repliche aggiornate, disponibili, e la generazione corrente della
 	// Spec osservata dal controller. Usato da `watch` per fermare
@@ -170,6 +178,21 @@ func (w *deploymentWorkload) PodRequests() corev1.ResourceList {
 // PodContainers implementa Workload.
 func (w *deploymentWorkload) PodContainers() []corev1.Container {
 	return w.d.Spec.Template.Spec.Containers
+}
+
+// ImagePullSecretNames implementa Workload.
+func (w *deploymentWorkload) ImagePullSecretNames() []string {
+	refs := w.d.Spec.Template.Spec.ImagePullSecrets
+	names := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		names = append(names, ref.Name)
+	}
+	return names
+}
+
+// ServiceAccountName implementa Workload.
+func (w *deploymentWorkload) ServiceAccountName() string {
+	return w.d.Spec.Template.Spec.ServiceAccountName
 }
 
 // RolloutComplete replica la logica di `kubectl rollout status` per

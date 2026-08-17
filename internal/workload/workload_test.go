@@ -129,6 +129,24 @@ func TestFromDeployment_PodContainers_EscludeInitContainer(t *testing.T) {
 	}
 }
 
+func TestFromDeployment_ImagePullSecretsEServiceAccount(t *testing.T) {
+	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+			ImagePullSecrets:   []corev1.LocalObjectReference{{Name: "registry-uno"}, {Name: "registry-due"}},
+			ServiceAccountName: "deployer",
+		}},
+	}}
+	w := workload.FromDeployment(d)
+
+	names := w.ImagePullSecretNames()
+	if len(names) != 2 || names[0] != "registry-uno" || names[1] != "registry-due" {
+		t.Fatalf("ImagePullSecretNames() = %+v, attesi registry-uno e registry-due", names)
+	}
+	if got := w.ServiceAccountName(); got != "deployer" {
+		t.Fatalf("ServiceAccountName() = %q, atteso deployer", got)
+	}
+}
+
 func TestFromDeployment_PodSelectorUsaSelectorController(t *testing.T) {
 	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{
 		Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},

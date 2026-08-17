@@ -37,6 +37,7 @@ func registeredChecks() []check.Check {
 		check.RequestsVsUsage{},
 		check.ProbeSanity{},
 		check.ResourceLimits{},
+		check.ImagePullSecrets{},
 	}
 }
 
