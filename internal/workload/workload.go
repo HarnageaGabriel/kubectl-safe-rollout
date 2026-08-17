@@ -21,6 +21,7 @@ package workload
 
 import (
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -72,6 +73,14 @@ type Workload interface {
 	// di revisioni precedenti durante un rollout.
 	PodSelector() (labels.Selector, error)
 	UpdateStrategy() UpdateStrategy
+	// PodRequests somma le request (non i limits) di tutti i container
+	// regolari del pod template, per confrontarle con l'headroom di una
+	// ResourceQuota durante il surge. Somma solo i container regolari:
+	// gli init container hanno una semantica di request effettiva
+	// diversa (il massimo tra loro e la somma dei regolari, non un
+	// ulteriore addendo), un dettaglio che la sola verifica di quota-
+	// headroom non ha bisogno di modellare per un margine ragionevole.
+	PodRequests() corev1.ResourceList
 	// RolloutComplete riporta se il rollout e' concluso con successo:
 	// repliche aggiornate, disponibili, e la generazione corrente della
 	// Spec osservata dal controller. Usato da `watch` per fermare
@@ -139,6 +148,19 @@ func (w *deploymentWorkload) UpdateStrategy() UpdateStrategy {
 		MaxUnavailable: &maxUnavailable,
 		MaxSurge:       &maxSurge,
 	}
+}
+
+// PodRequests implementa Workload.
+func (w *deploymentWorkload) PodRequests() corev1.ResourceList {
+	total := corev1.ResourceList{}
+	for _, c := range w.d.Spec.Template.Spec.Containers {
+		for name, qty := range c.Resources.Requests {
+			sum := total[name]
+			sum.Add(qty)
+			total[name] = sum
+		}
+	}
+	return total
 }
 
 // RolloutComplete replica la logica di `kubectl rollout status` per

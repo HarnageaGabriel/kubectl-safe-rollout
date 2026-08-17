@@ -33,6 +33,7 @@ import (
 func registeredChecks() []check.Check {
 	return []check.Check{
 		check.PDBConsistency{},
+		check.QuotaHeadroom{},
 	}
 }
 
