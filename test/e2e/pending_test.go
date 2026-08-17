@@ -1,0 +1,117 @@
+// Copyright 2026 Gabriel Harnagea
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//go:build e2e
+
+package e2e_test
+
+import (
+	"testing"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/diagnose"
+)
+
+// TestWatchE2E_RisorseInsufficienti verifica
+// pending-insufficient-resources: una richiesta di CPU molto piu' grande
+// di quella disponibile sull'unico nodo kind, lo scheduler rifiuta
+// subito con FailedScheduling.
+func TestWatchE2E_RisorseInsufficienti(t *testing.T) {
+	client := newE2EClient(t)
+	ns := newE2ENamespace(t, client)
+
+	podSpec := corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name:    "app",
+			Image:   "busybox:1.36",
+			Command: []string{"sh", "-c", "sleep 3600"},
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("1000"),
+				},
+			},
+		}},
+	}
+	d := deployWorkload(t, client, ns, "pending-risorse", 1, podSpec, nil)
+
+	watchAndExpectCause(t, client, ns, d, diagnose.CausePendingInsufficientResources, 2*time.Minute)
+}
+
+// TestWatchE2E_VincoliScheduling verifica
+// pending-scheduling-constraints: un nodeSelector che non corrisponde a
+// nessun nodo del cluster kind (a nodo singolo).
+func TestWatchE2E_VincoliScheduling(t *testing.T) {
+	client := newE2EClient(t)
+	ns := newE2ENamespace(t, client)
+
+	podSpec := corev1.PodSpec{
+		NodeSelector: map[string]string{"questa-label-non-esiste-su-nessun-nodo": "true"},
+		Containers: []corev1.Container{{
+			Name:    "app",
+			Image:   "busybox:1.36",
+			Command: []string{"sh", "-c", "sleep 3600"},
+		}},
+	}
+	d := deployWorkload(t, client, ns, "pending-scheduling", 1, podSpec, nil)
+
+	watchAndExpectCause(t, client, ns, d, diagnose.CausePendingSchedulingConstraints, 2*time.Minute)
+}
+
+// TestWatchE2E_PVCNonBindabile verifica pending-unbound-pvc: una
+// PersistentVolumeClaim con uno storageClassName inesistente non trova
+// mai un provisioner e resta Pending indefinitamente.
+func TestWatchE2E_PVCNonBindabile(t *testing.T) {
+	client := newE2EClient(t)
+	ns := newE2ENamespace(t, client)
+
+	storageClass := "questa-storageclass-non-esiste"
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "data-pvc", Namespace: ns},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			StorageClassName: &storageClass,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Mi")},
+			},
+		},
+	}
+	if _, err := client.CoreV1().PersistentVolumeClaims(ns).Create(t.Context(), pvc, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("creazione PersistentVolumeClaim: %v", err)
+	}
+
+	podSpec := corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name:    "app",
+			Image:   "busybox:1.36",
+			Command: []string{"sh", "-c", "sleep 3600"},
+			VolumeMounts: []corev1.VolumeMount{{
+				Name:      "data",
+				MountPath: "/data",
+			}},
+		}},
+		Volumes: []corev1.Volume{{
+			Name: "data",
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "data-pvc"},
+			},
+		}},
+	}
+	d := deployWorkload(t, client, ns, "pending-pvc", 1, podSpec, nil)
+
+	watchAndExpectCause(t, client, ns, d, diagnose.CausePendingUnboundPVC, 2*time.Minute)
+}

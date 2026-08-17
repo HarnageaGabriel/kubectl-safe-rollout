@@ -30,3 +30,9 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Local AI tooling config, not part of the published project
+.claude/
+.codex/
+CLAUDE.md
+AGENTS.md

@@ -1,0 +1,99 @@
+// Copyright 2026 Gabriel Harnagea
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//go:build e2e
+
+package e2e_test
+
+import (
+	"testing"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/intstr"
+
+	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/diagnose"
+)
+
+// TestWatchE2E_CrashLoopExitApplicativo verifica la classificazione
+// crashloop-app-error: un container che esce subito con un exit code
+// applicativo, ne' OOMKilled ne' ucciso dalla liveness probe.
+func TestWatchE2E_CrashLoopExitApplicativo(t *testing.T) {
+	client := newE2EClient(t)
+	ns := newE2ENamespace(t, client)
+
+	podSpec := corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name:    "app",
+			Image:   "busybox:1.36",
+			Command: []string{"sh", "-c", "exit 7"},
+		}},
+	}
+	d := deployWorkload(t, client, ns, "crashy-app-error", 1, podSpec, nil)
+
+	watchAndExpectCause(t, client, ns, d, diagnose.CauseCrashLoopAppError, 2*time.Minute)
+}
+
+// TestWatchE2E_CrashLoopOOMKilled verifica crashloop-oomkilled: un
+// container con un limite di memoria basso e un comando che alloca
+// memoria in modo crescente finche' il kernel non lo termina.
+func TestWatchE2E_CrashLoopOOMKilled(t *testing.T) {
+	client := newE2EClient(t)
+	ns := newE2ENamespace(t, client)
+
+	podSpec := corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name:    "app",
+			Image:   "busybox:1.36",
+			Command: []string{"sh", "-c", "x=A; while true; do x=$x$x$x$x; done"},
+			Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					corev1.ResourceMemory: resource.MustParse("16Mi"),
+				},
+			},
+		}},
+	}
+	d := deployWorkload(t, client, ns, "crashy-oom", 1, podSpec, nil)
+
+	watchAndExpectCause(t, client, ns, d, diagnose.CauseCrashLoopOOMKilled, 2*time.Minute)
+}
+
+// TestWatchE2E_CrashLoopLivenessProbe verifica crashloop-liveness-probe:
+// un container che parte e resta in esecuzione, ma la cui liveness
+// probe punta a un path che risponde sempre 404 con soglia di fallimento
+// bassa, cosi' il kubelet lo termina ripetutamente prima ancora che
+// possa crashare da solo.
+func TestWatchE2E_CrashLoopLivenessProbe(t *testing.T) {
+	client := newE2EClient(t)
+	ns := newE2ENamespace(t, client)
+
+	podSpec := corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name:  "app",
+			Image: "nginx:1.25",
+			LivenessProbe: &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					HTTPGet: &corev1.HTTPGetAction{Path: "/questo-path-non-esiste", Port: intstr.FromInt32(80)},
+				},
+				InitialDelaySeconds: 1,
+				PeriodSeconds:       1,
+				FailureThreshold:    1,
+			},
+		}},
+	}
+	d := deployWorkload(t, client, ns, "crashy-liveness", 1, podSpec, nil)
+
+	watchAndExpectCause(t, client, ns, d, diagnose.CauseCrashLoopLivenessProbe, 2*time.Minute)
+}

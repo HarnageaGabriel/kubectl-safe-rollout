@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Soglia di copertura concordata (vedi rules/test.md): 75%, qualche punto
+# sotto la copertura reale al momento in cui e' stata fissata (80.0% su
+# internal/..., unica parte del codice sottoposta a test unitari — la
+# CLI in cmd/ e' wiring cobra, testata dagli scenari e2e quando saranno
+# disponibili). Alzare solo quando il nuovo codice la supera davvero.
+env:
+  COVERAGE_THRESHOLD: "75"
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "File non formattati con gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test (tutti i package)
+        run: go test ./...
+
+      - name: Copertura (solo internal/)
+        # Il gate di copertura misura solo internal/...: cmd/ e' wiring
+        # cobra, senza logica di dominio, e in Go 1.26+
+        # un package senza test file entra comunque nel profilo merged
+        # con 0% delle sue statement, il che abbasserebbe la soglia
+        # senza motivo se calcolata su ./... (misurato: 80% su
+        # internal/... contro 60% su ./... con lo stesso codice).
+        run: go test ./internal/... -coverprofile=coverage.out -covermode=atomic
+
+      - name: Verifica soglia di copertura
+        run: |
+          total=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
+          echo "Copertura totale: ${total}%  (soglia: ${COVERAGE_THRESHOLD}%)"
+          awk -v t="$total" -v th="$COVERAGE_THRESHOLD" 'BEGIN { exit (t+0 >= th+0) ? 0 : 1 }' \
+            || { echo "Copertura sotto la soglia minima di ${COVERAGE_THRESHOLD}%"; exit 1; }
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
