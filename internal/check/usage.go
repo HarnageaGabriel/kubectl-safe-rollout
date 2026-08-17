@@ -127,8 +127,8 @@ func usageExceedsRequestFinding(namespace, podName, containerName string, reques
 		CheckID:  RequestsVsUsageCheckID,
 		Severity: model.SeverityMedium,
 		Cause: fmt.Sprintf(
-			"il container %q del pod %s (workload %s) usa piu' risorse di quante ne abbia richieste: il surge del rolling update sottostima lo spazio reale necessario su nodo",
-			containerName, resource, workloadRef,
+			"il container %q del pod %q (workload %s) usa piu' risorse di quante ne abbia richieste: il surge del rolling update sottostima lo spazio reale necessario su nodo",
+			containerName, podName, workloadRef,
 		),
 		Evidence: evidence,
 		Remediation: model.Remediation{
