@@ -81,6 +81,10 @@ type Workload interface {
 	// ulteriore addendo), un dettaglio che la sola verifica di quota-
 	// headroom non ha bisogno di modellare per un margine ragionevole.
 	PodRequests() corev1.ResourceList
+	// PodContainers espone i ContainerSpec regolari completi per i check
+	// che devono leggere Probe e Resources per-container: un DTO dedicato
+	// aggiungerebbe indirezione senza nascondere dettagli Kubernetes.
+	PodContainers() []corev1.Container
 	// RolloutComplete riporta se il rollout e' concluso con successo:
 	// repliche aggiornate, disponibili, e la generazione corrente della
 	// Spec osservata dal controller. Usato da `watch` per fermare
@@ -161,6 +165,11 @@ func (w *deploymentWorkload) PodRequests() corev1.ResourceList {
 		}
 	}
 	return total
+}
+
+// PodContainers implementa Workload.
+func (w *deploymentWorkload) PodContainers() []corev1.Container {
+	return w.d.Spec.Template.Spec.Containers
 }
 
 // RolloutComplete replica la logica di `kubectl rollout status` per

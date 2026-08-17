@@ -109,6 +109,26 @@ func TestFromDeployment_PodLabels(t *testing.T) {
 	}
 }
 
+func TestFromDeployment_PodContainers_EscludeInitContainer(t *testing.T) {
+	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "migrazioni"}},
+			Containers: []corev1.Container{
+				{Name: "app"},
+				{Name: "sidecar"},
+			},
+		}},
+	}}
+
+	got := workload.FromDeployment(d).PodContainers()
+	if len(got) != 2 {
+		t.Fatalf("PodContainers() ha restituito %d container, attesi 2 container regolari", len(got))
+	}
+	if got[0].Name != "app" || got[1].Name != "sidecar" {
+		t.Fatalf("PodContainers() = %+v, attesi solo app e sidecar", got)
+	}
+}
+
 func TestFromDeployment_PodSelectorUsaSelectorController(t *testing.T) {
 	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{
 		Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
