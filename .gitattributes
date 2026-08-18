@@ -1,0 +1,9 @@
+# Keep line endings LF in the repository and in every working tree.
+# Without this, a checkout on Windows with core.autocrlf=true converts .go
+# files to CRLF, and gofmt then reports every one of them as unformatted
+# while CI, which checks out on Linux, stays green. That divergence makes
+# `make lint` useless as a local gate exactly where it is needed most.
+* text=auto eol=lf
+
+*.png binary
+*.gif binary
