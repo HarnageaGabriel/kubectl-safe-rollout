@@ -88,6 +88,7 @@ func watchHealthyPod() *corev1.Pod {
 			Phase: corev1.PodRunning,
 			ContainerStatuses: []corev1.ContainerStatus{{
 				Name:  "app",
+				Ready: true,
 				State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
 			}},
 		},
