@@ -1,0 +1,91 @@
+name: Bug report
+description: Report incorrect behavior, a missed diagnosis, or a misclassification
+title: "[bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug. Do not paste secrets. Redact image references and namespace names if they are sensitive.
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: Paste the output of `kubectl safe-rollout version`.
+      placeholder: kubectl safe-rollout version
+    validations:
+      required: true
+
+  - type: input
+    id: kubernetes-version
+    attributes:
+      label: Kubernetes version
+      description: Paste the output of `kubectl version --short` or equivalent.
+      placeholder: kubectl version --short
+    validations:
+      required: true
+
+  - type: dropdown
+    id: container-runtime
+    attributes:
+      label: Container runtime
+      description: Event message formats differ between runtimes, which is frequently the root cause of a misclassification.
+      options:
+        - containerd
+        - CRI-O
+        - Docker Engine
+        - other/unknown
+    validations:
+      required: true
+
+  - type: dropdown
+    id: command-affected
+    attributes:
+      label: Command affected
+      options:
+        - check
+        - watch
+        - both
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and the rollout state.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: What did you expect to happen?
+      description: Describe the expected finding, diagnosis, or output.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tool-output
+    attributes:
+      label: Tool output
+      description: Use `--output json` when possible because it contains stable cause IDs. Redact sensitive data.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: kubernetes-evidence
+    attributes:
+      label: Relevant kubectl describe pod or kubectl get events output
+      description: Optional but strongly encouraged. A misclassification cannot be reproduced without the real event messages. Redact sensitive data.
+      render: shell
+
+  - type: checkboxes
+    id: existing-issues
+    attributes:
+      label: Existing issues
+      options:
+        - label: I searched existing issues for this problem.
+          required: true

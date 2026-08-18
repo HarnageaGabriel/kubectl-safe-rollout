@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/HarnageaGabriel/kubectl-safe-rollout/blob/main/SECURITY.md
+    about: Do not file vulnerabilities as public issues. Follow the private reporting instructions in SECURITY.md.

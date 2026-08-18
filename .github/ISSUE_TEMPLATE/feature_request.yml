@@ -1,0 +1,47 @@
+name: Feature request
+description: Propose a scoped check, diagnosis, or other improvement
+title: "[feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before writing a proposal, note the project's explicit non-goals: no cluster mutation or `--apply-fix`, no dashboard or TUI, no SaaS, no cost reporting, no LLM-based diagnosis, and no replacement for Argo Rollouts or Flagger.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem did you hit?
+      description: Describe the concrete rollout failure, not the desired solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-behavior
+    attributes:
+      label: Proposed behavior
+      description: Explain what the plugin should report or do differently.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: How would the tool know?
+      description: For a new check or cause, identify the Kubernetes API objects or fields that provide evidence and explain what happens when evidence is missing or ambiguous. Every classification must be deterministic and degrade to a `*-undetermined` cause rather than guess.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include existing tools you considered, if any.
+
+  - type: checkboxes
+    id: existing-issues
+    attributes:
+      label: Existing issues
+      options:
+        - label: I searched existing issues for this proposal.
+          required: true

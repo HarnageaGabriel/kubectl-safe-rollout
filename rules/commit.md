@@ -6,7 +6,7 @@ changelog automatico, eventuale futura integrazione con release-please
 o simili per le release krew).
 
 ```
-<tipo>(<scope opzionale>): <descrizione breve in italiano, imperativo>
+<tipo>(<scope opzionale>): <descrizione breve in inglese, imperativo>
 
 <corpo opzionale: perche', non cosa — il diff mostra gia' cosa>
 ```
@@ -28,13 +28,18 @@ Scope consigliati: il package toccato senza `internal/` (`check`,
 Esempi:
 
 ```
-feat(check): aggiungi verifica headroom ResourceQuota vs surge
-fix(check): pdb-consistency non gestiva selector nil come "nessun match"
-test(check): aggiungi caso Recreate + PDB con budget pieno
-docs: aggiorna README con la sezione e2e
+feat(check): add ResourceQuota headroom check
+fix(check): handle nil selector as no match in pdb-consistency
+test(check): add Recreate case with exhausted PDB budget
+docs: document end-to-end test workflow
 ```
 
 Un fix su un falso positivo o falso negativo di una verifica **deve**
 menzionare nel corpo lo scenario concreto che lo ha esposto: e' quello
 che rende il commit utile a chi debugga la stessa classe di problema
 in futuro, non solo un changelog.
+
+Ogni commit deve includere il trailer `Signed-off-by`, aggiunto con
+`git commit -s`, in conformita' al Developer Certificate of Origin
+(DCO). La CI rifiuta le pull request che contengono commit senza
+sign-off.
