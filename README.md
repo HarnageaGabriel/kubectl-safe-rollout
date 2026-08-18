@@ -146,7 +146,11 @@ A PodDisruptionBudget is enforced by the Eviction API—for example, during `kub
 ## What `watch` classifies
 
 - Crash loop: `crashloop-oomkilled`, `crashloop-liveness-probe`, `crashloop-app-error`.
-- Image pull: `imagepull-tag-not-found`, `imagepull-registry-unreachable`, `imagepull-credentials-missing`.
+- Container configuration: `configerror-missing-configmap`, `configerror-missing-secret`, `configerror-undetermined`.
+- Image pull: `imagepull-invalid-reference`, `imagepull-tag-not-found`, `imagepull-registry-unreachable`, `imagepull-credentials-missing`.
+- Volume mount: `volumemount-missing-secret`, `volumemount-missing-configmap`, `volumemount-undetermined`.
+- Init container: `initcontainer-app-error`, `initcontainer-oomkilled`, `initcontainer-undetermined`.
+- Readiness: `readiness-probe-failing`, `readiness-undetermined`. Readiness is reported only after the Deployment controller has concluded that the rollout is not progressing, so a slow-starting application is not flagged.
 - Pending: `pending-insufficient-resources`, `pending-scheduling-constraints`, `pending-unbound-pvc`.
 - Quota: `quota-exceeded`.
 - Progress deadline: `progress-deadline-exceeded`.
@@ -164,7 +168,7 @@ Each category has an `*-undetermined` variant for confirmed failures that lack e
 
 ## Verified and not verified
 
-Verified: 11 end-to-end scenarios on kind v0.32.0 with Kubernetes v1.36.1 and containerd 2.2, one per classified cause. They run with `make test-e2e` against a real cluster and real kubelet, scheduler, and containerd event messages.
+Verified: 17 end-to-end scenarios on kind v0.32.0 with Kubernetes v1.36.1 and containerd 2.2: 16 failure scenarios cover the classified causes, and one successful slow-start regression guards against readiness false positives. They run with `make test-e2e` against a real cluster and real kubelet, scheduler, and containerd event messages.
 
 Not verified:
 

@@ -118,6 +118,34 @@ func updatePodToCrashLoop(t *testing.T, client kubernetes.Interface) {
 	}
 }
 
+func updatePodRestartCount(t *testing.T, client kubernetes.Interface, restartCount int32) {
+	t.Helper()
+	ctx := context.Background()
+	p, err := client.CoreV1().Pods(testNamespace).Get(ctx, "app-1", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("reading fixture pod: %v", err)
+	}
+	p.ResourceVersion = "2"
+	p.Status.ContainerStatuses[0].RestartCount = restartCount
+	if _, err := client.CoreV1().Pods(testNamespace).UpdateStatus(ctx, p, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("updating pod restart count: %v", err)
+	}
+}
+
+func waitForPodWatch(t *testing.T, client *fake.Clientset) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, action := range client.Actions() {
+			if action.GetVerb() == "watch" && action.GetResource().Resource == "pods" {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("Watch did not establish the pod stream")
+}
+
 // TestWatch_CrashLoopStopsObservation verifies the loop end-to-end: a pod
 // entering CrashLoopBackOff after Watch() starts must produce an
 // unsuccessful Outcome with a classified cause through the fake
@@ -259,6 +287,143 @@ func TestWatch_TransientlyComplete_IsNotEnoughOnItsOwn(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("Watch did not finish before the timeout")
+	}
+}
+
+// TestWatch_RestartIncreaseResetsStabilityWindow verifies that a Deployment
+// remaining Complete cannot reuse quiet time accumulated before a container
+// restart. The new window may report success afterward because the test
+// override deliberately applies to both production window variants.
+func TestWatch_RestartIncreaseResetsStabilityWindow(t *testing.T) {
+	d := watchDeployment()
+	d.Status = appsv1.DeploymentStatus{
+		ObservedGeneration: 1,
+		UpdatedReplicas:    1,
+		Replicas:           1,
+		AvailableReplicas:  1,
+	}
+	client := fake.NewSimpleClientset(d, watchHealthyPod())
+	withListResourceVersion(client, "1")
+	const window = 400 * time.Millisecond
+	wt := diagnose.WatchTarget{
+		Namespace:       testNamespace,
+		Workload:        workload.FromDeployment(d),
+		Client:          client,
+		StabilityWindow: window,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	type result struct {
+		outcome diagnose.Outcome
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		outcome, err := diagnose.Watch(ctx, wt)
+		done <- result{outcome, err}
+	}()
+
+	waitForPodWatch(t, client)
+	time.Sleep(250 * time.Millisecond)
+	updatePodRestartCount(t, client, 1)
+
+	// The original timer expires about 150ms after this update. Waiting
+	// longer than that, but less than a fresh window, distinguishes a reset
+	// from the false success without depending on exact scheduler timing.
+	select {
+	case r := <-done:
+		t.Fatalf("Watch returned before a full quiet window after the restart: outcome=%+v err=%v", r.outcome, r.err)
+	case <-time.After(250 * time.Millisecond):
+	}
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("Watch returned an unexpected error: %v", r.err)
+		}
+		if !r.outcome.Succeeded {
+			t.Fatalf("expected success after the replacement quiet window, got %+v", r.outcome)
+		}
+	case <-ctx.Done():
+		t.Fatal("Watch did not report success after the replacement quiet window")
+	}
+}
+
+func TestWatch_PreexistingRestartCountDoesNotPreventSuccess(t *testing.T) {
+	d := watchDeployment()
+	d.Status = appsv1.DeploymentStatus{
+		ObservedGeneration: 1,
+		UpdatedReplicas:    1,
+		Replicas:           1,
+		AvailableReplicas:  1,
+	}
+	p := watchHealthyPod()
+	p.Status.ContainerStatuses[0].RestartCount = 3
+	client := fake.NewSimpleClientset(d, p)
+	withListResourceVersion(client, "1")
+	wt := diagnose.WatchTarget{
+		Namespace:       testNamespace,
+		Workload:        workload.FromDeployment(d),
+		Client:          client,
+		StabilityWindow: 50 * time.Millisecond,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	outcome, err := diagnose.Watch(ctx, wt)
+	if err != nil {
+		t.Fatalf("Watch returned an unexpected error: %v", err)
+	}
+	if !outcome.Succeeded {
+		t.Fatalf("an unchanged preexisting restart count must permit success, got %+v", outcome)
+	}
+}
+
+// TestWatch_ObservedRestartRequiresLongerQuietPeriod uses production windows:
+// after a restart, waiting longer than the clean 5s window must still not be
+// enough for success. The context is canceled instead of waiting for the full
+// 30s production quiet period.
+func TestWatch_ObservedRestartRequiresLongerQuietPeriod(t *testing.T) {
+	d := watchDeployment()
+	d.Status = appsv1.DeploymentStatus{
+		ObservedGeneration: 1,
+		UpdatedReplicas:    1,
+		Replicas:           1,
+		AvailableReplicas:  1,
+	}
+	client := fake.NewSimpleClientset(d, watchHealthyPod())
+	withListResourceVersion(client, "1")
+	wt := diagnose.WatchTarget{
+		Namespace: testNamespace,
+		Workload:  workload.FromDeployment(d),
+		Client:    client,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	type result struct {
+		outcome diagnose.Outcome
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		outcome, err := diagnose.Watch(ctx, wt)
+		done <- result{outcome, err}
+	}()
+
+	waitForPodWatch(t, client)
+	updatePodRestartCount(t, client, 1)
+	select {
+	case r := <-done:
+		cancel()
+		t.Fatalf("Watch returned after only the clean rollout window: outcome=%+v err=%v", r.outcome, r.err)
+	case <-time.After(5500 * time.Millisecond):
+	}
+
+	cancel()
+	r := <-done
+	if r.err != context.Canceled {
+		t.Fatalf("Watch returned %v after cancellation, expected context.Canceled", r.err)
 	}
 }
 

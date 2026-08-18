@@ -47,6 +47,13 @@ import (
 // enough to make `watch` noticeably slow for a genuinely healthy rollout.
 const rolloutStabilityWindow = 5 * time.Second
 
+// restartedRolloutStabilityWindow is the quiet period required after Watch
+// observes a restart count increase. The kubelet's own restart backoff grows
+// beyond rolloutStabilityWindow: the liveness-probe e2e measurement held
+// restartCount=3 from t=25s through t=49s, then reached 4 at t=54s. Requiring
+// 30s prevents one of those backoff gaps from looking like a healthy rollout.
+const restartedRolloutStabilityWindow = 30 * time.Second
+
 // undeterminedGraceWindow is how long to wait before finalizing an entirely
 // "-undetermined" outcome. Discovered in the ImagePullBackOff e2e scenarios:
 // the kubelet posts Waiting=ErrImagePull on the Pod at the same instant
@@ -79,10 +86,11 @@ type WatchTarget struct {
 	// LogTailer may be nil: no additional log evidence in
 	// CrashLoopBackOff diagnoses.
 	LogTailer LogTailer
-	// StabilityWindow overrides rolloutStabilityWindow when >0. It exists
-	// for tests (a 5s window would make the suite unnecessarily slow):
+	// StabilityWindow overrides both rolloutStabilityWindow and
+	// restartedRolloutStabilityWindow when >0. It exists for tests (the
+	// production windows would make the suite unnecessarily slow):
 	// `cmd/kubectl-safe_rollout` never sets it, so real use always gets the
-	// production default.
+	// production defaults.
 	StabilityWindow time.Duration
 	// UndeterminedGraceWindow overrides undeterminedGraceWindow when >0,
 	// for the same reason as StabilityWindow.
@@ -111,8 +119,9 @@ func Watch(ctx context.Context, wt WatchTarget) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("invalid pod selector for %s/%s: %w", wt.Workload.Kind(), wt.Workload.Name(), err)
 	}
 	selector := podSelector.String()
+	restarts := newRestartObservations()
 	for {
-		outcome, relist, err := watchFromCurrentState(ctx, wt, selector)
+		outcome, relist, err := watchFromCurrentState(ctx, wt, selector, restarts)
 		if relist {
 			continue
 		}
@@ -124,16 +133,18 @@ func Watch(ctx context.Context, wt WatchTarget) (Outcome, error) {
 // then watches from that resourceVersion. relist=true indicates that the RV
 // expired (HTTP 410): the caller starts again from a new List instead of
 // losing events or pretending the stream is still reliable.
-func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string) (Outcome, bool, error) {
+func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string, restarts *restartObservations) (Outcome, bool, error) {
 	initial, err := wt.Client.CoreV1().Pods(wt.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
 	if err != nil {
 		return Outcome{}, false, fmt.Errorf("initial pod list for %s/%s: %w", wt.Workload.Kind(), wt.Workload.Name(), err)
 	}
 	pods := indexPods(initial.Items)
 
-	window := wt.StabilityWindow
-	if window <= 0 {
-		window = rolloutStabilityWindow
+	cleanWindow := rolloutStabilityWindow
+	restartedWindow := restartedRolloutStabilityWindow
+	if wt.StabilityWindow > 0 {
+		cleanWindow = wt.StabilityWindow
+		restartedWindow = wt.StabilityWindow
 	}
 	graceWindow := wt.UndeterminedGraceWindow
 	if graceWindow <= 0 {
@@ -142,6 +153,7 @@ func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string)
 
 	var stability *time.Timer
 	var stabilityCh <-chan time.Time
+	var stabilityRestartCounts containerRestartCounts
 	// graceTicker repeats evaluateTick during the grace window instead of
 	// waiting passively: a Pod stuck in ImagePullBackOff may produce no new
 	// watch event for several seconds (the next pull attempt follows the
@@ -171,6 +183,7 @@ func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string)
 		graceDeadline = time.Time{}
 	}
 	handleTick := func() (Outcome, bool, error) {
+		restarts.observe(pods)
 		tr, err := evaluateTick(ctx, wt, pods)
 		if err != nil {
 			return Outcome{}, true, err
@@ -197,14 +210,33 @@ func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string)
 		default:
 			stopGrace()
 		}
+		// RolloutComplete can remain true while a liveness probe repeatedly
+		// kills a container. The pod may become Ready again during the
+		// kubelet's restart backoff, so an increased restart count invalidates
+		// the current quiet period even when the Deployment still looks
+		// complete. Counts are relative to the window opening: preexisting
+		// restart history must not make success impossible.
+		restartedDuringWindow := stability != nil && stabilityRestartCounts.increased(pods)
+		if restartedDuringWindow {
+			stability.Stop()
+			stability = nil
+			stabilityCh = nil
+			stabilityRestartCounts = nil
+		}
 		switch {
 		case tr.complete && stability == nil:
+			window := cleanWindow
+			if restarts.increaseObserved {
+				window = restartedWindow
+			}
+			stabilityRestartCounts = collectContainerRestartCounts(pods)
 			stability = time.NewTimer(window)
 			stabilityCh = stability.C
 		case !tr.complete && stability != nil:
 			stability.Stop()
 			stability = nil
 			stabilityCh = nil
+			stabilityRestartCounts = nil
 		}
 		return Outcome{}, false, nil
 	}
@@ -346,6 +378,56 @@ func podSlice(pods map[types.UID]corev1.Pod) []corev1.Pod {
 		out = append(out, p)
 	}
 	return out
+}
+
+type containerRestartKey struct {
+	pod       types.UID
+	podName   string
+	container string
+	init      bool
+}
+
+type containerRestartCounts map[containerRestartKey]int32
+
+func collectContainerRestartCounts(pods map[types.UID]corev1.Pod) containerRestartCounts {
+	counts := make(containerRestartCounts)
+	for _, pod := range pods {
+		for _, cs := range pod.Status.ContainerStatuses {
+			counts[containerRestartKey{pod: pod.UID, podName: pod.Name, container: cs.Name}] = cs.RestartCount
+		}
+		for _, cs := range pod.Status.InitContainerStatuses {
+			counts[containerRestartKey{pod: pod.UID, podName: pod.Name, container: cs.Name, init: true}] = cs.RestartCount
+		}
+	}
+	return counts
+}
+
+func (baseline containerRestartCounts) increased(pods map[types.UID]corev1.Pod) bool {
+	for key, count := range collectContainerRestartCounts(pods) {
+		if previous, ok := baseline[key]; ok && count > previous {
+			return true
+		}
+	}
+	return false
+}
+
+type restartObservations struct {
+	counts           containerRestartCounts
+	increaseObserved bool
+}
+
+func newRestartObservations() *restartObservations {
+	return &restartObservations{counts: make(containerRestartCounts)}
+}
+
+func (observations *restartObservations) observe(pods map[types.UID]corev1.Pod) {
+	current := collectContainerRestartCounts(pods)
+	for key, count := range current {
+		if previous, ok := observations.counts[key]; ok && count > previous {
+			observations.increaseObserved = true
+		}
+		observations.counts[key] = count
+	}
 }
 
 // tick is the outcome of one reevaluation of the observed state. complete

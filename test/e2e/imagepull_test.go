@@ -25,6 +25,24 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/diagnose"
 )
 
+// TestWatchE2E_InvalidImageReference verifies
+// imagepull-invalid-reference: the malformed image name is rejected by
+// the kubelet with InvalidImageName before any registry is contacted.
+func TestWatchE2E_InvalidImageReference(t *testing.T) {
+	client := newE2EClient(t)
+	ns := newE2ENamespace(t, client)
+
+	podSpec := corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name:  "app",
+			Image: "BUSYBOX:Bad_Tag!!",
+		}},
+	}
+	d := deployWorkload(t, client, ns, "pull-invalid-reference", 1, podSpec, nil)
+
+	watchAndExpectCause(t, client, ns, d, diagnose.CauseImagePullInvalidReference, 2*time.Minute)
+}
+
 // TestWatchE2E_NonexistentImageTag verifies imagepull-tag-not-found: a
 // tag that does not exist in a real, reachable repository (Docker Hub),
 // so the kind node's container runtime actually returns "manifest

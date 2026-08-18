@@ -30,8 +30,9 @@ import (
 // specific CauseID, see cause.go).
 const CrashLoopDiagnoserID = "crashloop"
 
-// CrashLoop classifies containers in CrashLoopBackOff, distinguishing
-// OOMKill, liveness probe termination, and application errors.
+// CrashLoop classifies containers in CrashLoopBackOff, plus containers that
+// have restarted after a liveness-probe Killing event, distinguishing OOMKill,
+// liveness probe termination, and application errors.
 //
 // Deliberate precedence order: the liveness probe event is checked before
 // ContainerStatus.LastTerminationState because when the probe kills the
@@ -49,13 +50,23 @@ func (d CrashLoop) Diagnose(ctx context.Context, target Target) (Result, error) 
 	var findings []model.Finding
 	for _, pod := range target.Pods {
 		for _, cs := range pod.Status.ContainerStatuses {
-			if cs.State.Waiting == nil || cs.State.Waiting.Reason != "CrashLoopBackOff" {
+			inCrashLoopBackOff := cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff"
+			if !inCrashLoopBackOff && (cs.RestartCount == 0 || !hasLivenessKilling(target, pod, cs)) {
 				continue
 			}
 			findings = append(findings, d.classify(ctx, target, pod, cs))
 		}
 	}
 	return Result{DiagnoserID: d.ID(), Findings: findings}, nil
+}
+
+func hasLivenessKilling(target Target, pod corev1.Pod, cs corev1.ContainerStatus) bool {
+	for _, e := range target.EventsByUID[pod.UID] {
+		if pattern.LivenessKilling(e.Reason, e.Message, cs.Name) {
+			return true
+		}
+	}
+	return false
 }
 
 func (d CrashLoop) classify(ctx context.Context, target Target, pod corev1.Pod, cs corev1.ContainerStatus) model.Finding {
