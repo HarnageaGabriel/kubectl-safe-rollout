@@ -1,0 +1,29 @@
+# Dependabot keeps two things current that this project cannot notice on its
+# own: the GitHub Actions it runs and the client-go line it builds against.
+#
+# client-go tracks Kubernetes minor releases, and this plugin reads Pod,
+# Event and ReplicaSet fields whose meaning is set by the API server. Finding
+# out that a field moved by reading a pull request is considerably cheaper
+# than finding out from a user whose rollout was misdiagnosed.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      kubernetes:
+        patterns:
+          - k8s.io/*
+          - sigs.k8s.io/*
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
