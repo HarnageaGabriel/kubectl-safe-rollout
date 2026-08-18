@@ -15,6 +15,8 @@
 package diagnose_test
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -155,3 +157,70 @@ func TestCrashLoop_NoProblem_ContainerRunning(t *testing.T) {
 }
 
 func ptrWaiting(w corev1.ContainerStateWaiting) *corev1.ContainerStateWaiting { return &w }
+
+// stubLogTailer returns a canned previous-log tail, including the trailing
+// newline that a real container log ends with.
+type stubLogTailer struct{ tail string }
+
+func (s stubLogTailer) PreviousLogTail(_ context.Context, _, _, _ string, _ int64) (string, error) {
+	return s.tail, nil
+}
+
+func TestCrashLoop_ApplicationError_LogTailTrimmed(t *testing.T) {
+	pods := []corev1.Pod{podWith("app-1", "app-1-uid", corev1.PodRunning, corev1.ContainerStatus{
+		Name:         "app",
+		RestartCount: 1,
+		State:        corev1.ContainerState{Waiting: ptrWaiting(crashLoopWaiting())},
+		LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+			Reason: "Error", ExitCode: 1,
+		}},
+	})}
+	target := newTarget(t, pods, nil, nil)
+	target.LogTailer = stubLogTailer{tail: "config file not found\n"}
+
+	res, err := diagnose.CrashLoop{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d: %+v", len(res.Findings), res.Findings)
+	}
+
+	var logEvidence string
+	for _, e := range res.Findings[0].Evidence {
+		if strings.HasPrefix(e, "log --previous") {
+			logEvidence = e
+		}
+	}
+	if logEvidence == "" {
+		t.Fatalf("expected log evidence, got %+v", res.Findings[0].Evidence)
+	}
+	// A trailing newline would render as a blank line inside the evidence
+	// block, since the human renderer already writes one per entry.
+	if strings.ContainsAny(logEvidence, "\r\n") {
+		t.Errorf("log evidence must not carry line breaks, got %q", logEvidence)
+	}
+}
+
+func TestCrashLoop_ApplicationError_BlankLogTailOmitted(t *testing.T) {
+	pods := []corev1.Pod{podWith("app-1", "app-1-uid", corev1.PodRunning, corev1.ContainerStatus{
+		Name:         "app",
+		RestartCount: 1,
+		State:        corev1.ContainerState{Waiting: ptrWaiting(crashLoopWaiting())},
+		LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+			Reason: "Error", ExitCode: 1,
+		}},
+	})}
+	target := newTarget(t, pods, nil, nil)
+	target.LogTailer = stubLogTailer{tail: "\n\n"}
+
+	res, err := diagnose.CrashLoop{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	for _, e := range res.Findings[0].Evidence {
+		if strings.HasPrefix(e, "log --previous") {
+			t.Errorf("a log tail of only line breaks must not become evidence, got %q", e)
+		}
+	}
+}
