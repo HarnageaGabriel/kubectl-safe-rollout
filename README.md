@@ -1,70 +1,200 @@
 # kubectl safe-rollout
 
-Plugin `kubectl` che riduce il tempo tra "il deploy e' fallito" e "so
-perche' e come lo sistemo".
+A `kubectl` plugin that shortens the time between "the deploy failed" and "I know why and how to fix it".
 
-> **Stato: MVP in sviluppo.** `check` include `pdb-consistency`; `watch`
-> osserva Deployment e Pod e classifica deterministicamente le cause MVP,
-> verificato con 11 scenari e2e su kind (`make test-e2e`). Demo/asciinema
-> restano da completare.
+[![CI](https://github.com/HarnageaGabriel/kubectl-safe-rollout/actions/workflows/ci.yml/badge.svg)](https://github.com/HarnageaGabriel/kubectl-safe-rollout/actions/workflows/ci.yml) [![Go version](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)](https://go.dev/) [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-## Cosa fa
+## What it does
 
-- `kubectl safe-rollout check <kind>/<name>` — analisi pre-flight del
-  workload live e del contesto namespace.
-- `kubectl safe-rollout watch <kind>/<name>` — osserva il rollout; in caso
-  di fallimento o stallo raccoglie stato, Event e log precedenti, classifica
-  la causa e propone remediation basata sull'evidenza.
+- `kubectl safe-rollout check <kind>/<name>` — pre-flight analysis of a live workload and the state of its namespace.
+- `kubectl safe-rollout watch <kind>/<name>` — watches a rollout through the Kubernetes Watch API and, when it fails or stalls, classifies the cause and proposes remediation based on the evidence it collected.
 
-`watch` distingue:
+Three properties are worth knowing before you install it:
 
-- CrashLoopBackOff: OOMKilled, liveness probe, exit applicativo;
-- ImagePullBackOff: tag/digest inesistente, registry irraggiungibile,
-  credenziali mancanti;
-- Pending: risorse insufficienti, quota, vincoli scheduling, PVC non Bound;
-- `ProgressDeadlineExceeded`.
+1. **It never modifies the cluster.** It is read-only and has no `--apply-fix` option.
+2. **Diagnosis is deterministic, not probabilistic.** It uses no LLM. When evidence confirms that a rollout is stuck but cannot distinguish between known causes, the finding uses an explicit `*-undetermined` cause and lists what was observed. It does not present the most likely cause as certain.
+3. **It is scoped to one rollout**, not to a whole-cluster audit.
 
-Evidenza insufficiente produce una diagnosi `*-undetermined`, mai una causa
-probabile presentata come certa.
+## Why it exists
 
-Il tool non modifica mai il cluster. Non e' dashboard, SaaS, cost reporting,
-ne' sostituto di Argo Rollouts o Flagger.
+Popeye, Polaris, kube-score, and k8sgpt already cover generic static analysis of manifests well. None of them watches one rollout and classifies its failure cause deterministically without depending on a language model. That gap is the reason for this project.
 
-## Build
+It is also why `check` prioritises verifications that need live namespace state—PodDisruptionBudget consistency, ResourceQuota headroom, and requests versus real usage—over checks that an offline linter already handles. Probe presence and limit presence remain included at low severity.
 
-Richiede Go 1.26+.
+## Installation
+
+### krew
+
+The plugin is not in the krew index yet. This command does not work from the index today; it is the command that will work once the plugin is published there:
 
 ```bash
-go build -o bin/kubectl-safe_rollout ./cmd/kubectl-safe_rollout
+kubectl krew install safe-rollout
 ```
 
-## Uso
+### Download a release binary
+
+Download the appropriate binary from [GitHub Releases](https://github.com/HarnageaGabriel/kubectl-safe-rollout/releases). The installed binary must be named `kubectl-safe_rollout`—the underscore is krew's convention for multi-word plugins—and its directory must be on `PATH` so `kubectl` can discover it.
+
+On Linux or macOS:
 
 ```bash
-go run ./cmd/kubectl-safe_rollout check deployment/checkout
-go run ./cmd/kubectl-safe_rollout check deployment/checkout --output json
-go run ./cmd/kubectl-safe_rollout watch deployment/checkout
-go run ./cmd/kubectl-safe_rollout watch deployment/checkout --output json
+sudo install -m 0755 /path/to/downloaded-binary /usr/local/bin/kubectl-safe_rollout
+kubectl plugin list
 ```
 
-Rispetta kubeconfig, context e namespace correnti, inclusi `--context`,
-`--namespace` e `--kubeconfig`. Exit code non zero sui finding High.
+### From source
 
-## Sviluppo
+Go 1.26 or later is required.
 
-- [docs/watch-vs-polling.md](docs/watch-vs-polling.md) — scelta Watch API.
-- [rules/](rules/) — convenzioni Go, test, output, commit e licenza.
-- `make test`, `make lint`, `make cover` — ciclo locale.
-- `make kind-up` poi `make test-e2e` — scenari e2e reali su kind
-  (richiede Docker). `make kind-down` per eliminare il cluster.
+```bash
+go install github.com/HarnageaGabriel/kubectl-safe-rollout/cmd/kubectl-safe_rollout@latest
+```
 
-## Licenza
+## Usage
 
-Apache License 2.0, vedi [LICENSE](LICENSE). Nessun NOTICE: il repository
-non vendorizza opere derivate con attribuzioni NOTICE. Motivazione completa
-in [rules/license.md](rules/license.md).
+```bash
+kubectl safe-rollout check deployment/checkout
+kubectl safe-rollout check deployment/checkout --output json
+kubectl safe-rollout watch deployment/checkout
+kubectl safe-rollout watch deployment/checkout --output json
+```
 
-## Contesto
+The plugin honours the current kubeconfig, context, and namespace, including `--context`, `--namespace`, and `--kubeconfig`.
 
-Progetto open source personale. Nessun codice, configurazione o pattern
-proveniente da progetti aziendali entra nel repository.
+The exit code is non-zero if and only if the report contains at least one `high` severity finding. `medium` and `low` findings provide context and do not fail a CI pipeline.
+
+## Example: check
+
+This is real output from a kind cluster. The target is a three-replica Deployment covered by a PodDisruptionBudget with `minAvailable: 3`, with no probes or resource limits, in a cluster without metrics-server.
+
+```text
+HIGH  pdb-consistency          PodDisruptionBudget/checkout
+      cause: PodDisruptionBudget "checkout" leaves no disruption headroom (minAvailable calculated over 3 replicas): a node drain concurrent with the rollout of Deployment/checkout will remain blocked until the pods are ready again
+      evidence: minAvailable=3
+      evidence: replicas=3
+      evidence: disruptionsAllowed=0
+      remediation: increase the PDB headroom (for example, maxUnavailable: 1 or minAvailable: 2) or increase the replicas of Deployment/checkout; the correct value depends on how many replicas can be lost in production
+      note: remediation is context dependent, review before applying
+OK    quota-headroom           no issues detected
+SKIP  requests-vs-usage        pod metrics are not accessible (metrics-server absent or not ready yet): the server could not find the requested resource (get pods.metrics.k8s.io)
+LOW   probe-sanity             Pod/checkout/app
+      cause: container "app" in the pod template of workload "checkout" does not define a readinessProbe
+      evidence: container=app
+      remediation: add a readinessProbe to container "app" using a check that represents when the application can receive traffic
+      note: remediation is context dependent, review before applying
+LOW   probe-sanity             Pod/checkout/app
+      cause: container "app" in the pod template of workload "checkout" does not define a livenessProbe
+      evidence: container=app
+      remediation: add a livenessProbe to container "app" using a check that detects when the application must be restarted
+      note: remediation is context dependent, review before applying
+LOW   resource-limits          Pod/checkout/app
+      cause: container "app" in the pod template of workload "checkout" does not define a CPU limit
+      evidence: container=app
+      remediation: add a CPU limit to container "app" to make throttling predictable and isolate its consumption from other workloads on the node; the value depends on the application's profile
+      note: remediation is context dependent, review before applying
+LOW   resource-limits          Pod/checkout/app
+      cause: container "app" in the pod template of workload "checkout" does not define a memory limit
+      evidence: container=app
+      remediation: add a memory limit to container "app" to contain consumption and prevent node-level OOMKills; the value depends on the application's profile
+      note: remediation is context dependent, review before applying
+LOW   image-pull-secrets       Pod/checkout/app
+      cause: container "app" uses image "ghcr.io/stefanprodan/podinfo:6.7.0" from a registry that does not appear to be Docker Hub (inferred exclusively from the hostname, without checking the registry), but neither the Pod nor ServiceAccount "default" declares imagePullSecrets
+      evidence: container=app
+      evidence: image=ghcr.io/stefanprodan/podinfo:6.7.0
+      evidence: serviceAccount=default
+      remediation: if the registry for image "ghcr.io/stefanprodan/podinfo:6.7.0" requires authentication, add an imagePullSecret to the pod template or ServiceAccount "default"; if the registry is public on a custom domain, this finding is a false positive because the inference uses only the hostname
+      note: remediation is context dependent, review before applying
+```
+
+The `SKIP` line is visible rather than silent: a check that could not evaluate must not look like a check that found nothing wrong. The `image-pull-secrets` finding also states that it infers registry behaviour from the hostname alone and may therefore be a false positive.
+
+## Example: watch
+
+This is real output from the same cluster against a Deployment whose container exits with code 1 at startup.
+
+```text
+HIGH  crashloop-app-error      Pod/payments-7484679db9-2x2h9
+      cause: container "app" in Pod/payments-7484679db9-2x2h9 exits due to an application error (exit code 1), neither OOMKill nor liveness probe
+      evidence: container=app
+      evidence: restartCount=4
+      evidence: exitCode=1 reason=Error
+      evidence: log --previous (last lines): config file /etc/payments/config.yaml not found
+      remediation: check the logs for container "app" to find the application cause of the exit
+        $ kubectl logs payments-7484679db9-2x2h9 -c app -n demo-readme --previous
+      note: remediation is context dependent, review before applying
+OK    imagepull                no issues detected
+OK    pending                  no issues detected
+OK    quota                    no issues detected
+OK    progress-deadline        no issues detected
+```
+
+The evidence includes the tail of the previous container's log. The suggested `kubectl logs --previous` command is read-only.
+
+## What `check` verifies
+
+| ID | Severity | What it needs from the cluster |
+| --- | --- | --- |
+| `pdb-consistency` | high | Workload replicas and update strategy; matching PodDisruptionBudget selectors, specification, and status. |
+| `quota-headroom` | high | Workload update strategy, calculated surge, pod resource requests, and live ResourceQuota hard and used values. |
+| `requests-vs-usage` | medium | Selected live Pods and their requests plus the Pod Metrics API. It needs metrics-server and skips cleanly without it. |
+| `probe-sanity` | low | Readiness and liveness probes in the live workload's pod template. |
+| `resource-limits` | low | CPU and memory limits in the live workload's pod template. |
+| `image-pull-secrets` | low | Container image hostnames and imagePullSecrets on the pod template or ServiceAccount. This is heuristic. |
+
+A PodDisruptionBudget is enforced by the Eviction API—for example, during `kubectl drain` or evictions initiated by the cluster-autoscaler or descheduler—and **not** by the Deployment controller when it replaces pods during a rolling update. `pdb-consistency` does not claim that a PDB blocks `kubectl rollout`; it reports that a node drain concurrent with the rollout window will stay blocked.
+
+## What `watch` classifies
+
+- Crash loop: `crashloop-oomkilled`, `crashloop-liveness-probe`, `crashloop-app-error`.
+- Image pull: `imagepull-tag-not-found`, `imagepull-registry-unreachable`, `imagepull-credentials-missing`.
+- Pending: `pending-insufficient-resources`, `pending-scheduling-constraints`, `pending-unbound-pvc`.
+- Quota: `quota-exceeded`.
+- Progress deadline: `progress-deadline-exceeded`.
+
+Each category has an `*-undetermined` variant for confirmed failures that lack enough evidence for a more specific cause. These IDs are stable: JSON output exposes them, and CI gates should key on them.
+
+## Non-goals
+
+- No dashboard or TUI.
+- No SaaS.
+- No cost reporting.
+- No LLM-based diagnosis.
+- No cluster mutation.
+- Not a replacement for Argo Rollouts or Flagger.
+
+## Verified and not verified
+
+Verified: 11 end-to-end scenarios on kind v0.32.0 with Kubernetes v1.36.1 and containerd 2.2, one per classified cause. They run with `make test-e2e` against a real cluster and real kubelet, scheduler, and containerd event messages.
+
+Not verified:
+
+- The other two supported Kubernetes minor versions.
+- CRI-O. Only containerd has been exercised, so event-message patterns for other runtimes are unconfirmed.
+- Reconnection after a real etcd compaction or HTTP 410 `resourceVersion` expiry. That path has only been exercised against a fake clientset.
+- Operation under a namespace-scoped read-only ServiceAccount with restricted RBAC.
+- API load and event correlation on large, busy namespaces.
+
+This list exists because a diagnosis tool that overstates what it has tested is worse than one that reports less.
+
+## Development
+
+```bash
+make build
+make test
+make lint
+make cover
+```
+
+The end-to-end suite requires Docker:
+
+```bash
+make kind-up
+make test-e2e
+make kind-down
+```
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md), the [security policy](SECURITY.md), and the [code of conduct](CODE_OF_CONDUCT.md) before contributing. Project conventions are in [rules/](rules/), and the Watch API design decision is documented in [docs/watch-vs-polling.md](docs/watch-vs-polling.md).
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE). There is no NOTICE file because the repository vendors no third-party sources; see [rules/license.md](rules/license.md) for the rationale.
