@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package check implementa le verifiche pre-flight statiche di
-// `kubectl safe-rollout check`. Ogni verifica vive nel proprio file e
-// implementa l'interfaccia Check: questo permette di aggiungere nuove
-// verifiche senza toccare le esistenti e di testarle in isolamento con
+// Package check implements the static pre-flight checks run by
+// `kubectl safe-rollout check`. Each check lives in its own file and
+// implements the Check interface: this allows new checks to be added
+// without changing existing ones and to be tested in isolation with
 // client-go/kubernetes/fake.
 package check
 
@@ -29,14 +29,14 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/workload"
 )
 
-// Target raggruppa tutto cio' che una verifica puo' avere bisogno di
-// leggere. E' costruito una sola volta per invocazione di `check` e
-// condiviso tra tutte le verifiche, cosi' il costo delle List (PDB,
-// ResourceQuota, ...) si puo' ammortizzare a monte se necessario.
+// Target groups everything a check may need to read. It is built once
+// per `check` invocation and shared among all checks, so the cost of
+// List calls (PDB, ResourceQuota, ...) can be amortized upstream if
+// needed.
 //
-// MetricsClient e' nil quando metrics-server non e' raggiungibile: le
-// verifiche che ne hanno bisogno devono degradare a Result.Skipped,
-// mai fallire l'intera esecuzione di `check`.
+// MetricsClient is nil when metrics-server is unreachable: checks that
+// need it must degrade to Result.Skipped, never fail the entire `check`
+// execution.
 type Target struct {
 	Namespace     string
 	Workload      workload.Workload
@@ -44,11 +44,11 @@ type Target struct {
 	MetricsClient metricsv1beta1.MetricsV1beta1Interface
 }
 
-// Result e' l'esito dell'esecuzione di una singola Check. Skipped
-// distingue "nessun problema trovato" (Findings vuoto, Skipped false) da
-// "non sono riuscito a valutarlo" (Skipped true, SkipReason valorizzato):
-// confonderli produrrebbe falsi negativi silenziosi, per esempio quando
-// mancano permessi RBAC su ResourceQuota.
+// Result is the outcome of running a single Check. Skipped distinguishes
+// "no problem found" (empty Findings, Skipped false) from "unable to
+// evaluate" (Skipped true, populated SkipReason): conflating them would
+// produce silent false negatives, for example when RBAC permissions on
+// ResourceQuota are missing.
 type Result struct {
 	CheckID    string
 	Findings   []model.Finding
@@ -56,17 +56,17 @@ type Result struct {
 	SkipReason string
 }
 
-// Check e' l'interfaccia che ogni verifica pre-flight implementa. ID deve
-// essere stabile tra versioni: e' la chiave usata nell'output json e nel
-// gating in CI su singole regole.
+// Check is the interface implemented by every pre-flight check. ID must
+// remain stable across versions: it is the key used in JSON output and
+// for CI gating on individual rules.
 type Check interface {
 	ID() string
 	Run(ctx context.Context, target Target) (Result, error)
 }
 
-// Skip costruisce un Result che dichiara esplicitamente l'impossibilita'
-// di valutare la verifica, invece di un Result vuoto che sarebbe
-// indistinguibile da "nessun problema".
+// Skip builds a Result that explicitly declares that the check cannot
+// be evaluated, instead of an empty Result that would be indistinguishable
+// from "no problem".
 func Skip(id, reason string) Result {
 	return Result{CheckID: id, Skipped: true, SkipReason: reason}
 }

@@ -26,32 +26,31 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/workload"
 )
 
-// PDBCheckID e' l'identificativo stabile di questa verifica, usato
-// nell'output json e per il gating in CI su singole regole.
+// PDBCheckID is the stable identifier for this check, used in JSON output
+// and for CI gating on individual rules.
 const PDBCheckID = "pdb-consistency"
 
-// PDBConsistency verifica che i PodDisruptionBudget che coprono un
-// workload lascino effettivamente margine di disruption.
+// PDBConsistency checks that PodDisruptionBudgets covering a workload
+// actually leave disruption headroom.
 //
-// Nota tecnica deliberata: un PDB e' applicato dalla Eviction API (usata
-// da `kubectl drain`, dal cluster-autoscaler, dal descheduler), non dal
-// controller del Deployment quando sostituisce i pod durante un rolling
-// update. Questa verifica non afferma quindi che il PDB blocchi
-// `kubectl rollout` di per se': afferma che, se un drenaggio di nodo o
-// una manutenzione capitano durante la finestra del rollout, restano
-// bloccati finche' il budget non si libera. E' lo scenario descritto nel
-// brief del progetto ed e' la causa reale piu' comune di rollout che
-// "sembrano" incastrati.
+// Deliberate technical note: a PDB is enforced by the Eviction API (used
+// by `kubectl drain`, the cluster-autoscaler, and the descheduler), not by
+// the Deployment controller when it replaces pods during a rolling update.
+// Therefore, this check does not claim that the PDB itself blocks
+// `kubectl rollout`: it states that if a node drain or maintenance occurs
+// during the rollout window, it remains blocked until the budget frees up.
+// This is the scenario described in the project brief and the most common
+// real cause of rollouts that "appear" stuck.
 type PDBConsistency struct{}
 
-// ID implementa check.Check.
+// ID implements check.Check.
 func (PDBConsistency) ID() string { return PDBCheckID }
 
-// Run implementa check.Check.
+// Run implements check.Check.
 func (c PDBConsistency) Run(ctx context.Context, target Target) (Result, error) {
 	pdbList, err := target.Client.PolicyV1().PodDisruptionBudgets(target.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return Skip(c.ID(), fmt.Sprintf("lista PodDisruptionBudget non accessibile: %v", err)), nil
+		return Skip(c.ID(), fmt.Sprintf("PodDisruptionBudget list is not accessible: %v", err)), nil
 	}
 
 	replicas := target.Workload.Replicas()
@@ -67,10 +66,10 @@ func (c PDBConsistency) Run(ctx context.Context, target Target) (Result, error) 
 
 		allowed, mode, err := allowedDisruptions(pdb.Spec.MinAvailable, pdb.Spec.MaxUnavailable, replicas)
 		if err != nil {
-			// PDB con Spec priva sia di MinAvailable che di
-			// MaxUnavailable non e' un oggetto valido lato apiserver:
-			// non dovrebbe succedere su un cluster reale, ma se
-			// succede non e' compito di questa verifica segnalarlo.
+			// A PDB whose Spec lacks both MinAvailable and
+			// MaxUnavailable is not a valid object from the API server's
+			// perspective: this should not happen on a real cluster, but
+			// if it does, reporting it is outside this check's scope.
 			continue
 		}
 
@@ -82,7 +81,7 @@ func (c PDBConsistency) Run(ctx context.Context, target Target) (Result, error) 
 				CheckID:  c.ID(),
 				Severity: model.SeverityHigh,
 				Cause: fmt.Sprintf(
-					"il PodDisruptionBudget %q non lascia margine di disruption (%s calcolato su %d repliche): un drenaggio di nodo concorrente al rollout di %s restera' bloccato finche' i pod non sono di nuovo pronti",
+					"PodDisruptionBudget %q leaves no disruption headroom (%s calculated over %d replicas): a node drain concurrent with the rollout of %s will remain blocked until the pods are ready again",
 					pdb.Name, mode, replicas, workloadRef,
 				),
 				Evidence: []string{
@@ -92,7 +91,7 @@ func (c PDBConsistency) Run(ctx context.Context, target Target) (Result, error) 
 				},
 				Remediation: model.Remediation{
 					Summary: fmt.Sprintf(
-						"aumenta il margine del PDB (es. maxUnavailable: 1 o minAvailable: %d) oppure aumenta le repliche di %s; il valore corretto dipende da quante repliche puoi permetterti di perdere in produzione",
+						"increase the PDB headroom (for example, maxUnavailable: 1 or minAvailable: %d) or increase the replicas of %s; the correct value depends on how many replicas can be lost in production",
 						replicas-1, workloadRef,
 					),
 					ContextDependent: true,
@@ -107,7 +106,7 @@ func (c PDBConsistency) Run(ctx context.Context, target Target) (Result, error) 
 				CheckID:  c.ID(),
 				Severity: model.SeverityHigh,
 				Cause: fmt.Sprintf(
-					"%s usa strategia Recreate (tutti i pod vengono terminati insieme) ma il PodDisruptionBudget %q permette solo %d disruption su %d repliche: una manutenzione di nodo durante il rollout si bloccherebbe comunque",
+					"%s uses the Recreate strategy (all pods are terminated together), but PodDisruptionBudget %q allows only %d disruptions out of %d replicas: node maintenance during the rollout would still be blocked",
 					workloadRef, pdb.Name, allowed, replicas,
 				),
 				Evidence: []string{
@@ -116,7 +115,7 @@ func (c PDBConsistency) Run(ctx context.Context, target Target) (Result, error) 
 					fmt.Sprintf("disruptionsAllowed=%d", allowed),
 				},
 				Remediation: model.Remediation{
-					Summary:          fmt.Sprintf("passa %s a strategia RollingUpdate, oppure allarga il PDB a maxUnavailable pari alle repliche totali se Recreate e' una scelta deliberata", workloadRef),
+					Summary:          fmt.Sprintf("switch %s to the RollingUpdate strategy, or widen the PDB to maxUnavailable equal to the total replicas if Recreate is a deliberate choice", workloadRef),
 					ContextDependent: true,
 				},
 				Resource: resource,
@@ -127,11 +126,11 @@ func (c PDBConsistency) Run(ctx context.Context, target Target) (Result, error) 
 	return Result{CheckID: c.ID(), Findings: findings}, nil
 }
 
-// allowedDisruptions calcola quanti pod il PDB permette di rendere
-// indisponibili contemporaneamente. Il roundUp riflette il comportamento
-// del controller PDB in-tree: minAvailable arrotonda per eccesso (piu'
-// prudente sul numero di pod da mantenere disponibili), maxUnavailable
-// arrotonda per difetto (piu' prudente sul numero di disruption concesse).
+// allowedDisruptions calculates how many pods the PDB allows to be
+// unavailable at once. roundUp reflects the behavior of the in-tree PDB
+// controller: minAvailable rounds up (more conservative about the number
+// of pods that must remain available), while maxUnavailable rounds down
+// (more conservative about the number of allowed disruptions).
 func allowedDisruptions(minAvailable, maxUnavailable *intstr.IntOrString, replicas int32) (allowed int32, mode string, err error) {
 	switch {
 	case minAvailable != nil:
@@ -149,7 +148,7 @@ func allowedDisruptions(minAvailable, maxUnavailable *intstr.IntOrString, replic
 		allowed = int32(v)
 		mode = "maxUnavailable"
 	default:
-		return 0, "", fmt.Errorf("PDB privo sia di minAvailable che di maxUnavailable")
+		return 0, "", fmt.Errorf("PDB has neither minAvailable nor maxUnavailable")
 	}
 	if allowed < 0 {
 		allowed = 0

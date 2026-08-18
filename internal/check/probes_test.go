@@ -40,67 +40,67 @@ func runProbeCheck(t *testing.T, d *appsv1.Deployment) check.Result {
 		Workload:  workload.FromDeployment(d),
 	})
 	if err != nil {
-		t.Fatalf("Run() ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Run() returned an unexpected error: %v", err)
 	}
 	return res
 }
 
-func TestProbeSanity_ReadinessAssente_Low(t *testing.T) {
+func TestProbeSanity_ReadinessMissing_Low(t *testing.T) {
 	res := runProbeCheck(t, deploymentWithContainers(corev1.Container{
 		Name:          "app",
 		LivenessProbe: &corev1.Probe{},
 	}))
 
 	if len(res.Findings) != 1 {
-		t.Fatalf("atteso 1 finding per readinessProbe assente, got %+v", res.Findings)
+		t.Fatalf("want 1 finding for missing readinessProbe, got %+v", res.Findings)
 	}
 	f := res.Findings[0]
 	if f.CheckID != check.ProbeSanityCheckID || f.Severity != model.SeverityLow {
-		t.Errorf("finding inatteso: checkID=%q severity=%v", f.CheckID, f.Severity)
+		t.Errorf("unexpected finding: checkID=%q severity=%v", f.CheckID, f.Severity)
 	}
 	if !strings.Contains(f.Cause, "app") || !strings.Contains(f.Cause, "readinessProbe") {
-		t.Errorf("cause non identifica container e probe mancanti: %q", f.Cause)
+		t.Errorf("cause does not identify the container and missing probe: %q", f.Cause)
 	}
 	if len(f.Evidence) == 0 || f.Evidence[0] != "container=app" {
-		t.Errorf("evidence = %+v, atteso container=app", f.Evidence)
+		t.Errorf("evidence = %+v, want container=app", f.Evidence)
 	}
 	if !f.Remediation.ContextDependent {
-		t.Error("la remediation della probe deve dichiararsi context-dependent")
+		t.Error("probe remediation must declare itself context-dependent")
 	}
 	if f.Resource.Kind != "Pod" || f.Resource.Namespace != testNamespace || f.Resource.Name != "checkout/app" {
-		t.Errorf("resource ref inatteso: %+v", f.Resource)
+		t.Errorf("unexpected resource ref: %+v", f.Resource)
 	}
 }
 
-func TestProbeSanity_LivenessAssente_Low(t *testing.T) {
+func TestProbeSanity_LivenessMissing_Low(t *testing.T) {
 	res := runProbeCheck(t, deploymentWithContainers(corev1.Container{
 		Name:           "app",
 		ReadinessProbe: &corev1.Probe{},
 	}))
 
 	if len(res.Findings) != 1 {
-		t.Fatalf("atteso 1 finding per livenessProbe assente, got %+v", res.Findings)
+		t.Fatalf("want 1 finding for missing livenessProbe, got %+v", res.Findings)
 	}
 	f := res.Findings[0]
 	if f.Severity != model.SeverityLow || !strings.Contains(f.Cause, "livenessProbe") {
-		t.Errorf("finding inatteso: %+v", f)
+		t.Errorf("unexpected finding: %+v", f)
 	}
 }
 
-func TestProbeSanity_EntrambeLeProbeAssenti_DueFinding(t *testing.T) {
+func TestProbeSanity_BothProbesMissing_TwoFindings(t *testing.T) {
 	res := runProbeCheck(t, deploymentWithContainers(corev1.Container{Name: "app"}))
 
 	if len(res.Findings) != 2 {
-		t.Fatalf("attesi 2 finding con entrambe le probe assenti, got %+v", res.Findings)
+		t.Fatalf("want 2 findings when both probes are missing, got %+v", res.Findings)
 	}
 	for _, f := range res.Findings {
 		if f.Severity != model.SeverityLow {
-			t.Errorf("severity = %v, atteso Low", f.Severity)
+			t.Errorf("severity = %v, want Low", f.Severity)
 		}
 	}
 }
 
-func TestProbeSanity_EntrambeLeProbePresenti_NessunFinding(t *testing.T) {
+func TestProbeSanity_BothProbesPresent_NoFindings(t *testing.T) {
 	res := runProbeCheck(t, deploymentWithContainers(corev1.Container{
 		Name:           "app",
 		ReadinessProbe: &corev1.Probe{},
@@ -108,6 +108,6 @@ func TestProbeSanity_EntrambeLeProbePresenti_NessunFinding(t *testing.T) {
 	}))
 
 	if len(res.Findings) != 0 {
-		t.Fatalf("attesi 0 finding con entrambe le probe presenti, got %+v", res.Findings)
+		t.Fatalf("want 0 findings when both probes are present, got %+v", res.Findings)
 	}
 }

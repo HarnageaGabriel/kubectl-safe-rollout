@@ -21,12 +21,12 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/model"
 )
 
-func TestSeverity_OrdinamentoNumerico(t *testing.T) {
-	// Il gating dell'exit code in cmd/kubectl-safe_rollout confronta le
-	// severita' con >: se l'ordine dei valori cambia, quel confronto si
-	// rompe silenziosamente. Questo test fissa il contratto.
+func TestSeverity_NumericOrdering(t *testing.T) {
+	// Exit code gating in cmd/kubectl-safe_rollout compares severities
+	// with >: if value order changes, that comparison silently breaks.
+	// This test locks down the contract.
 	if model.SeverityLow >= model.SeverityMedium || model.SeverityMedium >= model.SeverityHigh {
-		t.Fatalf("ordine severita' violato: low=%d medium=%d high=%d",
+		t.Fatalf("severity order violated: low=%d medium=%d high=%d",
 			model.SeverityLow, model.SeverityMedium, model.SeverityHigh)
 	}
 }
@@ -42,21 +42,21 @@ func TestSeverity_JSONRoundTrip(t *testing.T) {
 			t.Fatalf("Unmarshal(%s): %v", data, err)
 		}
 		if got != sev {
-			t.Errorf("round-trip: got %v, atteso %v (json: %s)", got, sev, data)
+			t.Errorf("round-trip: got %v, want %v (json: %s)", got, sev, data)
 		}
 	}
 }
 
-func TestSeverity_UnmarshalValoreSconosciuto(t *testing.T) {
+func TestSeverity_UnmarshalUnknownValue(t *testing.T) {
 	var s model.Severity
 	if err := json.Unmarshal([]byte(`"critical"`), &s); err == nil {
-		t.Fatal("atteso errore per severity sconosciuta, got nil")
+		t.Fatal("expected error for unknown severity, got nil")
 	}
 }
 
 func TestResourceRef_String(t *testing.T) {
 	r := model.ResourceRef{Kind: "Deployment", Namespace: "default", Name: "api"}
 	if got, want := r.String(), "Deployment/api"; got != want {
-		t.Errorf("ResourceRef.String() = %q, atteso %q", got, want)
+		t.Errorf("ResourceRef.String() = %q, want %q", got, want)
 	}
 }

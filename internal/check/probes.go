@@ -21,18 +21,18 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/model"
 )
 
-// ProbeSanityCheckID e' l'identificativo stabile di questa verifica.
+// ProbeSanityCheckID is the stable identifier for this check.
 const ProbeSanityCheckID = "probe-sanity"
 
-// ProbeSanity verifica la presenza delle probe di readiness e liveness
-// nei container regolari del pod template. Non valuta soglie o tempi:
-// senza il tempo di startup reale dell'app sarebbero euristiche arbitrarie.
+// ProbeSanity checks for readiness and liveness probes in regular containers
+// in the pod template. It does not evaluate thresholds or timings: without
+// the application's actual startup time, such heuristics would be arbitrary.
 type ProbeSanity struct{}
 
-// ID implementa check.Check.
+// ID implements check.Check.
 func (ProbeSanity) ID() string { return ProbeSanityCheckID }
 
-// Run implementa check.Check.
+// Run implements check.Check.
 func (c ProbeSanity) Run(_ context.Context, target Target) (Result, error) {
 	var findings []model.Finding
 	for _, container := range target.Workload.PodContainers() {
@@ -45,10 +45,10 @@ func (c ProbeSanity) Run(_ context.Context, target Target) (Result, error) {
 			findings = append(findings, model.Finding{
 				CheckID:  c.ID(),
 				Severity: model.SeverityLow,
-				Cause:    fmt.Sprintf("il container %q nel pod template del workload %q non definisce una readinessProbe", container.Name, target.Workload.Name()),
+				Cause:    fmt.Sprintf("container %q in the pod template of workload %q does not define a readinessProbe", container.Name, target.Workload.Name()),
 				Evidence: []string{fmt.Sprintf("container=%s", container.Name)},
 				Remediation: model.Remediation{
-					Summary:          fmt.Sprintf("aggiungi una readinessProbe al container %q usando un controllo che rappresenti quando l'app puo' ricevere traffico", container.Name),
+					Summary:          fmt.Sprintf("add a readinessProbe to container %q using a check that represents when the application can receive traffic", container.Name),
 					ContextDependent: true,
 				},
 				Resource: resource,
@@ -58,10 +58,10 @@ func (c ProbeSanity) Run(_ context.Context, target Target) (Result, error) {
 			findings = append(findings, model.Finding{
 				CheckID:  c.ID(),
 				Severity: model.SeverityLow,
-				Cause:    fmt.Sprintf("il container %q nel pod template del workload %q non definisce una livenessProbe", container.Name, target.Workload.Name()),
+				Cause:    fmt.Sprintf("container %q in the pod template of workload %q does not define a livenessProbe", container.Name, target.Workload.Name()),
 				Evidence: []string{fmt.Sprintf("container=%s", container.Name)},
 				Remediation: model.Remediation{
-					Summary:          fmt.Sprintf("aggiungi una livenessProbe al container %q usando un controllo che rilevi quando l'app deve essere riavviata", container.Name),
+					Summary:          fmt.Sprintf("add a livenessProbe to container %q using a check that detects when the application must be restarted", container.Name),
 					ContextDependent: true,
 				},
 				Resource: resource,

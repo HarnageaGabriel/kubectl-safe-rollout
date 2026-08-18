@@ -35,12 +35,12 @@ func runResourceLimitsCheck(t *testing.T, d *appsv1.Deployment) check.Result {
 		Workload:  workload.FromDeployment(d),
 	})
 	if err != nil {
-		t.Fatalf("Run() ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Run() returned an unexpected error: %v", err)
 	}
 	return res
 }
 
-func TestResourceLimits_CPULimitAssente_Low(t *testing.T) {
+func TestResourceLimits_CPULimitMissing_Low(t *testing.T) {
 	res := runResourceLimitsCheck(t, deploymentWithContainers(corev1.Container{
 		Name: "app",
 		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
@@ -49,27 +49,27 @@ func TestResourceLimits_CPULimitAssente_Low(t *testing.T) {
 	}))
 
 	if len(res.Findings) != 1 {
-		t.Fatalf("atteso 1 finding per limite CPU assente, got %+v", res.Findings)
+		t.Fatalf("want 1 finding for missing CPU limit, got %+v", res.Findings)
 	}
 	f := res.Findings[0]
 	if f.CheckID != check.ResourceLimitsCheckID || f.Severity != model.SeverityLow {
-		t.Errorf("finding inatteso: checkID=%q severity=%v", f.CheckID, f.Severity)
+		t.Errorf("unexpected finding: checkID=%q severity=%v", f.CheckID, f.Severity)
 	}
 	if !strings.Contains(f.Cause, "app") || !strings.Contains(f.Cause, "CPU") {
-		t.Errorf("cause non identifica container e limite mancanti: %q", f.Cause)
+		t.Errorf("cause does not identify the container and missing limit: %q", f.Cause)
 	}
 	if len(f.Evidence) == 0 || f.Evidence[0] != "container=app" {
-		t.Errorf("evidence = %+v, atteso container=app", f.Evidence)
+		t.Errorf("evidence = %+v, want container=app", f.Evidence)
 	}
 	if !f.Remediation.ContextDependent {
-		t.Error("la remediation del limite deve dichiararsi context-dependent")
+		t.Error("limit remediation must declare itself context-dependent")
 	}
 	if f.Resource.Kind != "Pod" || f.Resource.Namespace != testNamespace || f.Resource.Name != "checkout/app" {
-		t.Errorf("resource ref inatteso: %+v", f.Resource)
+		t.Errorf("unexpected resource ref: %+v", f.Resource)
 	}
 }
 
-func TestResourceLimits_MemoryLimitAssente_Low(t *testing.T) {
+func TestResourceLimits_MemoryLimitMissing_Low(t *testing.T) {
 	res := runResourceLimitsCheck(t, deploymentWithContainers(corev1.Container{
 		Name: "app",
 		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
@@ -78,31 +78,31 @@ func TestResourceLimits_MemoryLimitAssente_Low(t *testing.T) {
 	}))
 
 	if len(res.Findings) != 1 {
-		t.Fatalf("atteso 1 finding per limite memoria assente, got %+v", res.Findings)
+		t.Fatalf("want 1 finding for missing memory limit, got %+v", res.Findings)
 	}
 	f := res.Findings[0]
-	if f.Severity != model.SeverityLow || !strings.Contains(f.Cause, "memoria") {
-		t.Errorf("finding inatteso: %+v", f)
+	if f.Severity != model.SeverityLow || !strings.Contains(f.Cause, "memory") {
+		t.Errorf("unexpected finding: %+v", f)
 	}
 	if !strings.Contains(f.Remediation.Summary, "OOMKill") {
-		t.Errorf("remediation memoria non menziona il rischio OOMKill: %q", f.Remediation.Summary)
+		t.Errorf("memory remediation does not mention OOMKill risk: %q", f.Remediation.Summary)
 	}
 }
 
-func TestResourceLimits_EntrambiILimitAssenti_DueFinding(t *testing.T) {
+func TestResourceLimits_BothLimitsMissing_TwoFindings(t *testing.T) {
 	res := runResourceLimitsCheck(t, deploymentWithContainers(corev1.Container{Name: "app"}))
 
 	if len(res.Findings) != 2 {
-		t.Fatalf("attesi 2 finding con entrambi i limiti assenti, got %+v", res.Findings)
+		t.Fatalf("want 2 findings when both limits are missing, got %+v", res.Findings)
 	}
 	for _, f := range res.Findings {
 		if f.Severity != model.SeverityLow {
-			t.Errorf("severity = %v, atteso Low", f.Severity)
+			t.Errorf("severity = %v, want Low", f.Severity)
 		}
 	}
 }
 
-func TestResourceLimits_EntrambiILimitPresenti_NessunFinding(t *testing.T) {
+func TestResourceLimits_BothLimitsPresent_NoFindings(t *testing.T) {
 	res := runResourceLimitsCheck(t, deploymentWithContainers(corev1.Container{
 		Name: "app",
 		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
@@ -112,6 +112,6 @@ func TestResourceLimits_EntrambiILimitPresenti_NessunFinding(t *testing.T) {
 	}))
 
 	if len(res.Findings) != 0 {
-		t.Fatalf("attesi 0 finding con entrambi i limiti presenti, got %+v", res.Findings)
+		t.Fatalf("want 0 findings when both limits are present, got %+v", res.Findings)
 	}
 }
