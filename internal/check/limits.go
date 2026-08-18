@@ -23,17 +23,17 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/model"
 )
 
-// ResourceLimitsCheckID e' l'identificativo stabile di questa verifica.
+// ResourceLimitsCheckID is the stable identifier for this check.
 const ResourceLimitsCheckID = "resource-limits"
 
-// ResourceLimits verifica la presenza dei limiti CPU e memoria nei
-// container regolari del pod template.
+// ResourceLimits checks for CPU and memory limits in regular containers
+// in the pod template.
 type ResourceLimits struct{}
 
-// ID implementa check.Check.
+// ID implements check.Check.
 func (ResourceLimits) ID() string { return ResourceLimitsCheckID }
 
-// Run implementa check.Check.
+// Run implements check.Check.
 func (c ResourceLimits) Run(_ context.Context, target Target) (Result, error) {
 	var findings []model.Finding
 	for _, container := range target.Workload.PodContainers() {
@@ -46,10 +46,10 @@ func (c ResourceLimits) Run(_ context.Context, target Target) (Result, error) {
 			findings = append(findings, model.Finding{
 				CheckID:  c.ID(),
 				Severity: model.SeverityLow,
-				Cause:    fmt.Sprintf("il container %q nel pod template del workload %q non definisce un limite CPU", container.Name, target.Workload.Name()),
+				Cause:    fmt.Sprintf("container %q in the pod template of workload %q does not define a CPU limit", container.Name, target.Workload.Name()),
 				Evidence: []string{fmt.Sprintf("container=%s", container.Name)},
 				Remediation: model.Remediation{
-					Summary:          fmt.Sprintf("aggiungi un limite CPU al container %q per rendere prevedibile il throttling e isolarne il consumo dagli altri workload sul nodo; il valore dipende dal profilo dell'app", container.Name),
+					Summary:          fmt.Sprintf("add a CPU limit to container %q to make throttling predictable and isolate its consumption from other workloads on the node; the value depends on the application's profile", container.Name),
 					ContextDependent: true,
 				},
 				Resource: resource,
@@ -59,10 +59,10 @@ func (c ResourceLimits) Run(_ context.Context, target Target) (Result, error) {
 			findings = append(findings, model.Finding{
 				CheckID:  c.ID(),
 				Severity: model.SeverityLow,
-				Cause:    fmt.Sprintf("il container %q nel pod template del workload %q non definisce un limite di memoria", container.Name, target.Workload.Name()),
+				Cause:    fmt.Sprintf("container %q in the pod template of workload %q does not define a memory limit", container.Name, target.Workload.Name()),
 				Evidence: []string{fmt.Sprintf("container=%s", container.Name)},
 				Remediation: model.Remediation{
-					Summary:          fmt.Sprintf("aggiungi un limite di memoria al container %q per contenere il consumo ed evitare OOMKill a livello di nodo; il valore dipende dal profilo dell'app", container.Name),
+					Summary:          fmt.Sprintf("add a memory limit to container %q to contain consumption and prevent node-level OOMKills; the value depends on the application's profile", container.Name),
 					ContextDependent: true,
 				},
 				Resource: resource,

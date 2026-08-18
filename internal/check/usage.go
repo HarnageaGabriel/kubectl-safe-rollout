@@ -24,54 +24,53 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/model"
 )
 
-// RequestsVsUsageCheckID e' l'identificativo stabile di questa verifica.
+// RequestsVsUsageCheckID is the stable identifier for this check.
 const RequestsVsUsageCheckID = "requests-vs-usage"
 
-// RequestsVsUsage confronta l'uso reale dei pod correnti del workload
-// (letto da metrics-server) con le request dichiarate nel pod template.
-// Request sottostimate rispetto all'uso reale sono un rischio concreto
-// ma non deterministico per il rollout: durante il surge, i pod nuovi
-// vengono schedulati assumendo che quelli esistenti consumino quanto
-// dichiarato, non quanto consumano davvero. Severity Medium, non High:
-// a differenza di `quota-headroom` o `pdb-consistency`, qui non c'e' un
-// calcolo che garantisce il blocco del rollout, solo un margine di
-// sicurezza eroso.
+// RequestsVsUsage compares the actual usage of the workload's current pods
+// (read from metrics-server) with the requests declared in the pod template.
+// Requests that understate actual usage pose a concrete but nondeterministic
+// rollout risk: during surge, new pods are scheduled on the assumption that
+// existing pods consume what they declared, not what they actually consume.
+// Severity Medium, not High: unlike `quota-headroom` or `pdb-consistency`,
+// there is no calculation here that guarantees the rollout will be blocked,
+// only an eroded safety margin.
 //
-// Confronta solo le risorse per cui una request e' effettivamente
-// dichiarata: un container senza request per una risorsa e' compito di
-// una verifica diversa (presenza di request/limits, non ancora
-// implementata), non di questa.
+// It compares only resources for which a request is actually declared: a
+// container without a request for a resource is the responsibility of a
+// different check (presence of requests/limits, not yet implemented), not
+// this one.
 type RequestsVsUsage struct{}
 
-// ID implementa check.Check.
+// ID implements check.Check.
 func (RequestsVsUsage) ID() string { return RequestsVsUsageCheckID }
 
-// Run implementa check.Check.
+// Run implements check.Check.
 func (c RequestsVsUsage) Run(ctx context.Context, target Target) (Result, error) {
 	if target.MetricsClient == nil {
-		return Skip(c.ID(), "metrics-server non raggiungibile: client metrics non disponibile"), nil
+		return Skip(c.ID(), "metrics-server is unreachable: metrics client is unavailable"), nil
 	}
 
 	selector, err := target.Workload.PodSelector()
 	if err != nil {
-		return Skip(c.ID(), fmt.Sprintf("selector pod non valido: %v", err)), nil
+		return Skip(c.ID(), fmt.Sprintf("invalid pod selector: %v", err)), nil
 	}
 	listOpts := metav1.ListOptions{LabelSelector: selector.String()}
 
 	podList, err := target.Client.CoreV1().Pods(target.Namespace).List(ctx, listOpts)
 	if err != nil {
-		return Skip(c.ID(), fmt.Sprintf("lista pod non accessibile: %v", err)), nil
+		return Skip(c.ID(), fmt.Sprintf("pod list is not accessible: %v", err)), nil
 	}
 	if len(podList.Items) == 0 {
-		// Nessun pod ancora in esecuzione (es. primo rollout non
-		// partito): niente da confrontare, non un'impossibilita' di
-		// valutare.
+		// No pods are running yet (for example, the first rollout has
+		// not started): there is nothing to compare, not an inability
+		// to evaluate.
 		return Result{CheckID: c.ID()}, nil
 	}
 
 	metricsList, err := target.MetricsClient.PodMetricses(target.Namespace).List(ctx, listOpts)
 	if err != nil {
-		return Skip(c.ID(), fmt.Sprintf("metriche pod non accessibili (metrics-server assente o non ancora pronto): %v", err)), nil
+		return Skip(c.ID(), fmt.Sprintf("pod metrics are not accessible (metrics-server absent or not ready yet): %v", err)), nil
 	}
 
 	requests := indexContainerRequests(podList.Items)
@@ -116,7 +115,7 @@ func usageExceedsRequestFinding(namespace, podName, containerName string, reques
 			continue
 		}
 		if use.Cmp(req) > 0 {
-			evidence = append(evidence, fmt.Sprintf("%s: request=%s uso=%s", resName, req.String(), use.String()))
+			evidence = append(evidence, fmt.Sprintf("%s: request=%s usage=%s", resName, req.String(), use.String()))
 		}
 	}
 	if len(evidence) == 0 {
@@ -127,12 +126,12 @@ func usageExceedsRequestFinding(namespace, podName, containerName string, reques
 		CheckID:  RequestsVsUsageCheckID,
 		Severity: model.SeverityMedium,
 		Cause: fmt.Sprintf(
-			"il container %q del pod %q (workload %s) usa piu' risorse di quante ne abbia richieste: il surge del rolling update sottostima lo spazio reale necessario su nodo",
+			"container %q in pod %q (workload %s) uses more resources than it requested: rolling update surge underestimates the actual node capacity required",
 			containerName, podName, workloadRef,
 		),
 		Evidence: evidence,
 		Remediation: model.Remediation{
-			Summary:          fmt.Sprintf("aumenta le request del container %q ad almeno l'uso osservato; il valore esatto dipende dal profilo di carico reale nel tempo, non solo da questo campione", containerName),
+			Summary:          fmt.Sprintf("increase the requests for container %q to at least the observed usage; the exact value depends on the actual load profile over time, not just this sample", containerName),
 			ContextDependent: true,
 		},
 		Resource: resource,

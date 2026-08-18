@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package model contiene i tipi condivisi tra check, diagnose, remediate e
-// output. Un Finding rappresentato allo stesso modo indipendentemente dal
-// fatto che provenga da un'analisi statica (check) o da una diagnosi di un
-// rollout live (diagnose) permette all'output layer di renderli con lo
-// stesso codice.
+// Package model contains the types shared by check, diagnose, remediate,
+// and output. Representing a Finding the same way regardless of whether it
+// comes from static analysis (check) or a live rollout diagnosis (diagnose)
+// allows the output layer to render them with the same code.
 package model
 
 import (
@@ -24,22 +23,22 @@ import (
 	"fmt"
 )
 
-// Severity indica quanto un Finding e' bloccante per un rollout sicuro.
-// L'ordine dei valori e' significativo: Severity piu' alta ha valore
-// intero maggiore, cosi' un semplice confronto numerico basta per
-// determinare l'exit code piu' alto da restituire in CI.
+// Severity indicates how much a Finding blocks a safe rollout. Value order
+// is significant: a higher Severity has a greater integer value, so a simple
+// numeric comparison is enough to determine the highest exit code to return
+// in CI.
 type Severity int
 
 const (
-	// SeverityLow segnala una deviazione dalle best practice che non
-	// mette a rischio il rollout in corso (es. limits assenti ma
-	// requests presenti).
+	// SeverityLow reports a deviation from best practices that does not
+	// put the current rollout at risk (e.g. missing limits but requests
+	// are present).
 	SeverityLow Severity = iota
-	// SeverityMedium segnala un rischio concreto ma non deterministico:
-	// il rollout puo' fallire a seconda delle condizioni del cluster.
+	// SeverityMedium reports a concrete but nondeterministic risk: the
+	// rollout may fail depending on cluster conditions.
 	SeverityMedium
-	// SeverityHigh segnala una condizione che, con alta confidenza,
-	// blocchera' o ha gia' bloccato il rollout.
+	// SeverityHigh reports a condition that, with high confidence, will
+	// block or has already blocked the rollout.
 	SeverityHigh
 )
 
@@ -56,16 +55,16 @@ func (s Severity) String() string {
 	}
 }
 
-// MarshalJSON serializza la Severity come stringa minuscola invece che
-// come intero, per un output JSON leggibile e stabile tra versioni anche
-// se l'ordine delle costanti cambiasse in futuro.
+// MarshalJSON serializes Severity as a lowercase string rather than an
+// integer, keeping JSON output readable and stable across versions even if
+// the constant order changes in the future.
 func (s Severity) MarshalJSON() ([]byte, error) {
 	return []byte(fmt.Sprintf("%q", s.String())), nil
 }
 
-// UnmarshalJSON e' il contraltare di MarshalJSON: serve a chi consuma
-// l'output json di `check` (es. in CI, o una futura libreria) e ai test
-// di round-trip di questo stesso package.
+// UnmarshalJSON is the counterpart to MarshalJSON: it serves consumers of
+// `check` JSON output (e.g. in CI or a future library) and this package's
+// round-trip tests.
 func (s *Severity) UnmarshalJSON(data []byte) error {
 	var str string
 	if err := json.Unmarshal(data, &str); err != nil {
@@ -79,16 +78,16 @@ func (s *Severity) UnmarshalJSON(data []byte) error {
 	case "high":
 		*s = SeverityHigh
 	default:
-		return fmt.Errorf("severity sconosciuta: %q", str)
+		return fmt.Errorf("unknown severity: %q", str)
 	}
 	return nil
 }
 
-// ResourceRef identifica la risorsa Kubernetes a cui un Finding si
-// riferisce. E' separato dal resto del Finding perche' un singolo check
-// puo', in futuro, produrre finding su risorse diverse dal target
-// principale (es. il check PDB emette un finding sul PodDisruptionBudget,
-// non sul Deployment).
+// ResourceRef identifies the Kubernetes resource a Finding refers to. It is
+// separate from the rest of the Finding because a single check may, in the
+// future, produce findings for resources other than the main target (e.g.
+// the PDB check emits a finding for the PodDisruptionBudget, not the
+// Deployment).
 type ResourceRef struct {
 	Kind      string `json:"kind"`
 	Namespace string `json:"namespace"`
@@ -99,32 +98,30 @@ func (r ResourceRef) String() string {
 	return fmt.Sprintf("%s/%s", r.Kind, r.Name)
 }
 
-// Remediation descrive come intervenire su un Finding. ContextDependent
-// deve essere true ogni volta che il comando suggerito potrebbe non
-// essere corretto o sicuro senza il giudizio di chi opera: i criteri di
-// qualita' del progetto vietano un Finding senza remediation concreta O
-// senza questa dichiarazione esplicita, non ammettono un terzo caso in
-// cui si suggerisce qualcosa di potenzialmente sbagliato spacciandolo
-// per sicuro.
+// Remediation describes how to address a Finding. ContextDependent must be
+// true whenever the suggested command might not be correct or safe without
+// operator judgment: the project's quality criteria prohibit a Finding
+// without concrete remediation OR without this explicit declaration. They
+// do not allow a third case where something potentially wrong is suggested
+// as safe.
 type Remediation struct {
-	// Summary e' la spiegazione in linguaggio naturale dell'intervento
-	// suggerito. Obbligatorio.
+	// Summary is the natural-language explanation of the suggested action.
+	// Required.
 	Summary string `json:"summary"`
-	// Commands sono comandi kubectl pronti per l'uso, quando esiste un
-	// intervento univoco. Puo' essere vuoto se ContextDependent e' true.
+	// Commands contains ready-to-use kubectl commands when there is an
+	// unambiguous action. It may be empty if ContextDependent is true.
 	Commands []string `json:"commands,omitempty"`
-	// ContextDependent dichiara che la remediation corretta dipende da
-	// scelte che solo chi opera puo' fare (es. quale valore di replicas
-	// e' accettabile per il business).
+	// ContextDependent declares that the correct remediation depends on
+	// choices only the operator can make (e.g. which replicas value is
+	// acceptable for the business).
 	ContextDependent bool `json:"contextDependent"`
 }
 
-// Finding e' l'unita' atomica di segnalazione, prodotta sia da un Check
-// (analisi statica pre-flight) sia da un Diagnoser (classificazione di un
-// rollout fallito). CheckID e' l'identificativo stabile della verifica o
-// della classificazione che ha generato il finding (es.
-// "pdb-consistency", "crashloop-oomkilled"): e' quello che l'output json
-// espone per permettere il gating in CI su singole regole.
+// Finding is the atomic reporting unit, produced by both a Check (pre-flight
+// static analysis) and a Diagnoser (failed rollout classification). CheckID
+// is the stable identifier of the check or classification that generated
+// the finding (e.g. "pdb-consistency", "crashloop-oomkilled"): it is what
+// the JSON output exposes to allow CI gating on individual rules.
 type Finding struct {
 	CheckID     string      `json:"checkId"`
 	Severity    Severity    `json:"severity"`
@@ -132,14 +129,13 @@ type Finding struct {
 	Evidence    []string    `json:"evidence,omitempty"`
 	Remediation Remediation `json:"remediation"`
 	Resource    ResourceRef `json:"resource"`
-	// Undetermined e' false per costruzione in ogni Finding prodotto da
-	// un Check (l'analisi statica e' deterministica per definizione: o
-	// trova la condizione o non la trova). Un Diagnoser lo imposta a
-	// true quando l'evidenza raccolta durante un watch conferma che il
-	// rollout e' bloccato ma non basta a distinguere tra le cause note:
-	// in quel caso Cause descrive "non determinato" ed Evidence elenca
-	// cosa e' stato osservato, mai una causa scelta a indovinare:
-	// un suggerimento sbagliato su un cluster di produzione costa piu'
-	// del silenzio.
+	// Undetermined is false by construction in every Finding produced by
+	// a Check (static analysis is deterministic by definition: it either
+	// finds the condition or does not). A Diagnoser sets it to true when
+	// evidence collected during a watch confirms that the rollout is
+	// blocked but is insufficient to distinguish among known causes: in
+	// that case Cause describes "undetermined" and Evidence lists what
+	// was observed, never a guessed cause: a wrong suggestion on a
+	// production cluster costs more than silence.
 	Undetermined bool `json:"undetermined,omitempty"`
 }

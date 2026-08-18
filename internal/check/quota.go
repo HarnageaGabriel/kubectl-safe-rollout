@@ -27,32 +27,32 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/workload"
 )
 
-// QuotaHeadroomCheckID e' l'identificativo stabile di questa verifica.
+// QuotaHeadroomCheckID is the stable identifier for this check.
 const QuotaHeadroomCheckID = "quota-headroom"
 
-// QuotaHeadroom verifica che le ResourceQuota del namespace lascino
-// margine sufficiente per il surge del rolling update: numero di pod
-// (chiave "pods") e CPU/memoria richieste dai pod aggiuntivi (chiavi
-// "cpu"/"requests.cpu", "memory"/"requests.memory"). Se il margine non
-// basta, il surge non riesce a partire e il rollout resta bloccato con
-// pod Pending, molto prima che si arrivi a diagnosticarlo in `watch`.
+// QuotaHeadroom checks that namespace ResourceQuotas leave enough headroom
+// for rolling update surge: number of pods ("pods" key) and CPU/memory
+// requested by additional pods ("cpu"/"requests.cpu" and
+// "memory"/"requests.memory" keys). If the headroom is insufficient, the
+// surge cannot start and the rollout remains blocked with Pending pods,
+// long before `watch` gets a chance to diagnose it.
 //
-// Semplificazioni deliberate, coerenti con l'MVP: una ResourceQuota con
-// uno scopeSelector (es. limitata ai pod BestEffort) viene trattata come
-// se si applicasse comunque a tutti i pod del namespace — un falso
-// positivo occasionale costa meno di un margine sovrastimato lasciato
-// silenzioso. PodRequests somma solo i container regolari, non gli init
-// container (vedi workload.Workload.PodRequests).
+// Deliberate simplifications consistent with the MVP: a ResourceQuota with
+// a scopeSelector (for example, limited to BestEffort pods) is treated as
+// though it still applied to all pods in the namespace—an occasional false
+// positive costs less than silently overestimating headroom. PodRequests
+// sums only regular containers, not init containers (see
+// workload.Workload.PodRequests).
 type QuotaHeadroom struct{}
 
-// ID implementa check.Check.
+// ID implements check.Check.
 func (QuotaHeadroom) ID() string { return QuotaHeadroomCheckID }
 
-// Run implementa check.Check.
+// Run implements check.Check.
 func (c QuotaHeadroom) Run(ctx context.Context, target Target) (Result, error) {
 	quotaList, err := target.Client.CoreV1().ResourceQuotas(target.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return Skip(c.ID(), fmt.Sprintf("lista ResourceQuota non accessibile: %v", err)), nil
+		return Skip(c.ID(), fmt.Sprintf("ResourceQuota list is not accessible: %v", err)), nil
 	}
 	if len(quotaList.Items) == 0 {
 		return Result{CheckID: c.ID()}, nil
@@ -60,7 +60,7 @@ func (c QuotaHeadroom) Run(ctx context.Context, target Target) (Result, error) {
 
 	surge, ok := surgeCount(target.Workload)
 	if !ok {
-		// Recreate, o maxSurge=0: nessun pod aggiuntivo da coprire.
+		// Recreate, or maxSurge=0: no additional pods to cover.
 		return Result{CheckID: c.ID()}, nil
 	}
 
@@ -83,10 +83,10 @@ func (c QuotaHeadroom) Run(ctx context.Context, target Target) (Result, error) {
 	return Result{CheckID: c.ID(), Findings: findings}, nil
 }
 
-// surgeCount calcola quanti pod in piu' del numero di repliche desiderate
-// il rolling update puo' creare contemporaneamente. ok=false quando la
-// strategia non fa surge (Recreate) o il calcolo risulta a zero: in
-// entrambi i casi non c'e' headroom aggiuntivo da verificare.
+// surgeCount calculates how many pods above the desired replica count the
+// rolling update can create at once. ok=false when the strategy does not
+// surge (Recreate) or the calculation yields zero: in either case there is
+// no additional headroom to check.
 func surgeCount(w workload.Workload) (int32, bool) {
 	strategy := w.UpdateStrategy()
 	if strategy.Type != workload.RollingUpdate || strategy.MaxSurge == nil {
@@ -112,7 +112,7 @@ func podCountFinding(q corev1.ResourceQuota, resourceRef model.ResourceRef, work
 		CheckID:  QuotaHeadroomCheckID,
 		Severity: model.SeverityHigh,
 		Cause: fmt.Sprintf(
-			"il rolling update di %s puo' creare fino a %d pod in piu' durante il surge, ma la ResourceQuota %q lascia margine per solo %d pod aggiuntivi (hard=%s, used=%s)",
+			"the rolling update of %s can create up to %d additional pods during surge, but ResourceQuota %q leaves headroom for only %d additional pods (hard=%s, used=%s)",
 			workloadRef, surge, q.Name, available, hard.String(), used.String(),
 		),
 		Evidence: []string{
@@ -120,7 +120,7 @@ func podCountFinding(q corev1.ResourceQuota, resourceRef model.ResourceRef, work
 			fmt.Sprintf("quota pods hard=%s used=%s", hard.String(), used.String()),
 		},
 		Remediation: model.Remediation{
-			Summary:          fmt.Sprintf("aumenta la quota \"pods\" di %q, riduci maxSurge di %s, o libera capacita' terminando altri workload; la scelta corretta dipende da chi condivide il namespace", q.Name, workloadRef),
+			Summary:          fmt.Sprintf("increase the \"pods\" quota of %q, reduce maxSurge for %s, or free capacity by terminating other workloads; the correct choice depends on who shares the namespace", q.Name, workloadRef),
 			ContextDependent: true,
 		},
 		Resource: resourceRef,
@@ -142,7 +142,7 @@ func computeFinding(q corev1.ResourceQuota, resourceRef model.ResourceRef, workl
 		CheckID:  QuotaHeadroomCheckID,
 		Severity: model.SeverityHigh,
 		Cause: fmt.Sprintf(
-			"il rolling update di %s richiede fino a %s di %s aggiuntivi durante il surge (%d pod), ma la ResourceQuota %q lascia margine per solo %s",
+			"the rolling update of %s requires up to %s of additional %s during surge (%d pods), but ResourceQuota %q leaves only %s of headroom",
 			workloadRef, needed.String(), resName, surge, q.Name, available.String(),
 		),
 		Evidence: []string{
@@ -150,18 +150,18 @@ func computeFinding(q corev1.ResourceQuota, resourceRef model.ResourceRef, workl
 			fmt.Sprintf("quota %s hard=%s used=%s", resName, hard.String(), used.String()),
 		},
 		Remediation: model.Remediation{
-			Summary:          fmt.Sprintf("aumenta la quota di %s su %q, riduci maxSurge di %s, o riduci le request del container; la scelta corretta dipende da quanta capacita' extra il namespace puo' offrire durante un rollout", resName, q.Name, workloadRef),
+			Summary:          fmt.Sprintf("increase the %s quota on %q, reduce maxSurge for %s, or reduce container requests; the correct choice depends on how much extra capacity the namespace can provide during a rollout", resName, q.Name, workloadRef),
 			ContextDependent: true,
 		},
 		Resource: resourceRef,
 	}, true
 }
 
-// headroom legge la coppia hard/used di una ResourceQuota per una data
-// risorsa, provando prima la chiave con prefisso (es. "requests.cpu")
-// e poi l'alias senza prefisso (es. "cpu", equivalente per le quota):
-// non tutte le ResourceQuota usano lo stesso stile di chiave. ok=false
-// se la quota non vincola affatto questa risorsa.
+// headroom reads a ResourceQuota's hard/used pair for a given resource,
+// trying the prefixed key first (for example, "requests.cpu") and then the
+// unprefixed alias (for example, "cpu", equivalent for quotas): not all
+// ResourceQuotas use the same key style. ok=false if the quota does not
+// constrain this resource at all.
 func headroom(q corev1.ResourceQuota, name corev1.ResourceName, prefix string) (hard, used resource.Quantity, ok bool) {
 	keys := []corev1.ResourceName{name}
 	if prefix != "" {

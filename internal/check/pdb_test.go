@@ -94,19 +94,19 @@ func runPDBCheck(t *testing.T, d *appsv1.Deployment, objs ...runtime.Object) che
 
 	res, err := check.PDBConsistency{}.Run(context.Background(), target)
 	if err != nil {
-		t.Fatalf("Run() ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Run() returned an unexpected error: %v", err)
 	}
 	return res
 }
 
-func TestPDBConsistency_NessunPDB(t *testing.T) {
+func TestPDBConsistency_NoPDB(t *testing.T) {
 	res := runPDBCheck(t, deployment(3, rollingUpdateStrategy(nil)))
 
 	if res.Skipped {
-		t.Fatalf("il check non deve essere skipped in assenza di PDB, got skip reason %q", res.SkipReason)
+		t.Fatalf("check must not be skipped when no PDB exists, got skip reason %q", res.SkipReason)
 	}
 	if len(res.Findings) != 0 {
-		t.Fatalf("attesi 0 finding senza PDB nel namespace, got %d: %+v", len(res.Findings), res.Findings)
+		t.Fatalf("want 0 findings without a PDB in the namespace, got %d: %+v", len(res.Findings), res.Findings)
 	}
 }
 
@@ -118,21 +118,21 @@ func TestPDBConsistency_MaxUnavailableZero_High(t *testing.T) {
 	)
 
 	if len(res.Findings) != 1 {
-		t.Fatalf("attesi 1 finding, got %d: %+v", len(res.Findings), res.Findings)
+		t.Fatalf("want 1 finding, got %d: %+v", len(res.Findings), res.Findings)
 	}
 	f := res.Findings[0]
 	if f.Severity != model.SeverityHigh {
-		t.Errorf("severity = %v, atteso High", f.Severity)
+		t.Errorf("severity = %v, want High", f.Severity)
 	}
 	if f.CheckID != check.PDBCheckID {
-		t.Errorf("checkID = %q, atteso %q", f.CheckID, check.PDBCheckID)
+		t.Errorf("checkID = %q, want %q", f.CheckID, check.PDBCheckID)
 	}
 	if !f.Remediation.ContextDependent {
-		t.Errorf("la remediation su un PDB troppo restrittivo deve dichiararsi context-dependent")
+		t.Errorf("remediation for an overly restrictive PDB must declare itself context-dependent")
 	}
 }
 
-func TestPDBConsistency_MinAvailableUgualeAReplicas_High(t *testing.T) {
+func TestPDBConsistency_MinAvailableEqualsReplicas_High(t *testing.T) {
 	three := intstr.FromInt(3)
 	res := runPDBCheck(t,
 		deployment(3, rollingUpdateStrategy(nil)),
@@ -140,11 +140,11 @@ func TestPDBConsistency_MinAvailableUgualeAReplicas_High(t *testing.T) {
 	)
 
 	if len(res.Findings) != 1 || res.Findings[0].Severity != model.SeverityHigh {
-		t.Fatalf("atteso 1 finding High per minAvailable >= replicas, got %+v", res.Findings)
+		t.Fatalf("want 1 High finding for minAvailable >= replicas, got %+v", res.Findings)
 	}
 }
 
-func TestPDBConsistency_BudgetSufficiente_NessunFinding(t *testing.T) {
+func TestPDBConsistency_SufficientBudget_NoFindings(t *testing.T) {
 	one := intstr.FromInt(1)
 	res := runPDBCheck(t,
 		deployment(3, rollingUpdateStrategy(nil)),
@@ -152,11 +152,11 @@ func TestPDBConsistency_BudgetSufficiente_NessunFinding(t *testing.T) {
 	)
 
 	if len(res.Findings) != 0 {
-		t.Fatalf("attesi 0 finding con maxUnavailable=1 su 3 repliche, got %+v", res.Findings)
+		t.Fatalf("want 0 findings with maxUnavailable=1 out of 3 replicas, got %+v", res.Findings)
 	}
 }
 
-func TestPDBConsistency_SelectorNonCorrispondente_Ignorato(t *testing.T) {
+func TestPDBConsistency_NonMatchingSelector_Ignored(t *testing.T) {
 	zero := intstr.FromInt(0)
 	res := runPDBCheck(t,
 		deployment(3, rollingUpdateStrategy(nil)),
@@ -164,11 +164,11 @@ func TestPDBConsistency_SelectorNonCorrispondente_Ignorato(t *testing.T) {
 	)
 
 	if len(res.Findings) != 0 {
-		t.Fatalf("un PDB con selector non corrispondente non deve produrre finding, got %+v", res.Findings)
+		t.Fatalf("a PDB with a non-matching selector must not produce findings, got %+v", res.Findings)
 	}
 }
 
-func TestPDBConsistency_RecreateConBudgetParziale_High(t *testing.T) {
+func TestPDBConsistency_RecreateWithPartialBudget_High(t *testing.T) {
 	one := intstr.FromInt(1)
 	res := runPDBCheck(t,
 		deployment(3, recreateStrategy()),
@@ -176,14 +176,14 @@ func TestPDBConsistency_RecreateConBudgetParziale_High(t *testing.T) {
 	)
 
 	if len(res.Findings) != 1 {
-		t.Fatalf("atteso 1 finding per Recreate + PDB parziale, got %+v", res.Findings)
+		t.Fatalf("want 1 finding for Recreate plus partial PDB, got %+v", res.Findings)
 	}
 	if res.Findings[0].Severity != model.SeverityHigh {
-		t.Errorf("severity = %v, atteso High", res.Findings[0].Severity)
+		t.Errorf("severity = %v, want High", res.Findings[0].Severity)
 	}
 }
 
-func TestPDBConsistency_RecreateConBudgetPieno_NessunFinding(t *testing.T) {
+func TestPDBConsistency_RecreateWithFullBudget_NoFindings(t *testing.T) {
 	three := intstr.FromInt(3)
 	res := runPDBCheck(t,
 		deployment(3, recreateStrategy()),
@@ -191,14 +191,14 @@ func TestPDBConsistency_RecreateConBudgetPieno_NessunFinding(t *testing.T) {
 	)
 
 	if len(res.Findings) != 0 {
-		t.Fatalf("un PDB che permette la disruption di tutte le repliche non deve confliggere con Recreate, got %+v", res.Findings)
+		t.Fatalf("a PDB allowing disruption of all replicas must not conflict with Recreate, got %+v", res.Findings)
 	}
 }
 
-func TestPDBConsistency_ListaFallita_Skipped(t *testing.T) {
+func TestPDBConsistency_ListFailed_Skipped(t *testing.T) {
 	client := fake.NewSimpleClientset(deployment(3, rollingUpdateStrategy(nil)))
 	client.PrependReactor("list", "poddisruptionbudgets", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, errors.New("forbidden: RBAC nega la lettura dei PodDisruptionBudget")
+		return true, nil, errors.New("forbidden: RBAC denies reading PodDisruptionBudgets")
 	})
 
 	target := check.Target{
@@ -209,12 +209,12 @@ func TestPDBConsistency_ListaFallita_Skipped(t *testing.T) {
 
 	res, err := check.PDBConsistency{}.Run(context.Background(), target)
 	if err != nil {
-		t.Fatalf("Run() non deve restituire errore su lista fallita, deve degradare a Skipped: %v", err)
+		t.Fatalf("Run() must not return an error on a failed list; it must degrade to Skipped: %v", err)
 	}
 	if !res.Skipped {
-		t.Fatalf("atteso Skipped=true quando la lista dei PDB non e' accessibile")
+		t.Fatalf("want Skipped=true when the PDB list is not accessible")
 	}
 	if res.SkipReason == "" {
-		t.Errorf("SkipReason non deve essere vuoto")
+		t.Errorf("SkipReason must not be empty")
 	}
 }

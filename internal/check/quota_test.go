@@ -80,24 +80,24 @@ func runQuotaCheck(t *testing.T, d *appsv1.Deployment, objs ...runtime.Object) c
 
 	res, err := check.QuotaHeadroom{}.Run(context.Background(), target)
 	if err != nil {
-		t.Fatalf("Run() ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Run() returned an unexpected error: %v", err)
 	}
 	return res
 }
 
-func TestQuotaHeadroom_NessunaQuota(t *testing.T) {
+func TestQuotaHeadroom_NoQuota(t *testing.T) {
 	one := intstr.FromString("25%")
 	res := runQuotaCheck(t, deploymentWithRequests(4, &one, "100m", "128Mi"))
 
 	if res.Skipped {
-		t.Fatalf("il check non deve essere skipped senza ResourceQuota, got skip reason %q", res.SkipReason)
+		t.Fatalf("check must not be skipped without ResourceQuota, got skip reason %q", res.SkipReason)
 	}
 	if len(res.Findings) != 0 {
-		t.Fatalf("attesi 0 finding senza ResourceQuota nel namespace, got %d: %+v", len(res.Findings), res.Findings)
+		t.Fatalf("want 0 findings without ResourceQuota in the namespace, got %d: %+v", len(res.Findings), res.Findings)
 	}
 }
 
-func TestQuotaHeadroom_Recreate_NessunSurge(t *testing.T) {
+func TestQuotaHeadroom_Recreate_NoSurge(t *testing.T) {
 	d := deploymentWithRequests(4, nil, "100m", "128Mi")
 	d.Spec.Strategy = recreateStrategy()
 	res := runQuotaCheck(t, d,
@@ -105,11 +105,11 @@ func TestQuotaHeadroom_Recreate_NessunSurge(t *testing.T) {
 	)
 
 	if len(res.Findings) != 0 {
-		t.Fatalf("Recreate non fa surge, attesi 0 finding anche con quota piena, got %+v", res.Findings)
+		t.Fatalf("Recreate does not surge; want 0 findings even with a full quota, got %+v", res.Findings)
 	}
 }
 
-func TestQuotaHeadroom_MargineSufficiente_NessunFinding(t *testing.T) {
+func TestQuotaHeadroom_SufficientHeadroom_NoFindings(t *testing.T) {
 	surge := intstr.FromInt(1)
 	res := runQuotaCheck(t, deploymentWithRequests(4, &surge, "100m", "128Mi"),
 		resourceQuota("ampia",
@@ -127,11 +127,11 @@ func TestQuotaHeadroom_MargineSufficiente_NessunFinding(t *testing.T) {
 	)
 
 	if len(res.Findings) != 0 {
-		t.Fatalf("margine ampio, attesi 0 finding, got %+v", res.Findings)
+		t.Fatalf("ample headroom: want 0 findings, got %+v", res.Findings)
 	}
 }
 
-func TestQuotaHeadroom_PodsInsufficienti_High(t *testing.T) {
+func TestQuotaHeadroom_InsufficientPods_High(t *testing.T) {
 	surge := intstr.FromInt(1)
 	res := runQuotaCheck(t, deploymentWithRequests(4, &surge, "100m", "128Mi"),
 		resourceQuota("stretta",
@@ -141,21 +141,21 @@ func TestQuotaHeadroom_PodsInsufficienti_High(t *testing.T) {
 	)
 
 	if len(res.Findings) != 1 {
-		t.Fatalf("atteso 1 finding per quota pods esaurita, got %+v", res.Findings)
+		t.Fatalf("want 1 finding for exhausted pods quota, got %+v", res.Findings)
 	}
 	f := res.Findings[0]
 	if f.Severity != model.SeverityHigh {
-		t.Errorf("severity = %v, atteso High", f.Severity)
+		t.Errorf("severity = %v, want High", f.Severity)
 	}
 	if f.CheckID != check.QuotaHeadroomCheckID {
-		t.Errorf("checkID = %q, atteso %q", f.CheckID, check.QuotaHeadroomCheckID)
+		t.Errorf("checkID = %q, want %q", f.CheckID, check.QuotaHeadroomCheckID)
 	}
 	if !f.Remediation.ContextDependent {
-		t.Errorf("la remediation su una quota insufficiente deve dichiararsi context-dependent")
+		t.Errorf("remediation for insufficient quota must declare itself context-dependent")
 	}
 }
 
-func TestQuotaHeadroom_CPUInsufficiente_High(t *testing.T) {
+func TestQuotaHeadroom_InsufficientCPU_High(t *testing.T) {
 	surge := intstr.FromInt(2)
 	res := runQuotaCheck(t, deploymentWithRequests(4, &surge, "500m", "128Mi"),
 		resourceQuota("cpu-stretta",
@@ -171,14 +171,14 @@ func TestQuotaHeadroom_CPUInsufficiente_High(t *testing.T) {
 	)
 
 	if len(res.Findings) != 1 {
-		t.Fatalf("atteso 1 finding per cpu insufficiente (alias \"cpu\"), got %+v", res.Findings)
+		t.Fatalf("want 1 finding for insufficient CPU (\"cpu\" alias), got %+v", res.Findings)
 	}
 	if res.Findings[0].Severity != model.SeverityHigh {
-		t.Errorf("severity = %v, atteso High", res.Findings[0].Severity)
+		t.Errorf("severity = %v, want High", res.Findings[0].Severity)
 	}
 }
 
-func TestQuotaHeadroom_QuotaSenzaChiaviRilevanti_Ignorata(t *testing.T) {
+func TestQuotaHeadroom_QuotaWithoutRelevantKeys_Ignored(t *testing.T) {
 	surge := intstr.FromInt(1)
 	res := runQuotaCheck(t, deploymentWithRequests(4, &surge, "100m", "128Mi"),
 		resourceQuota("solo-storage",
@@ -188,16 +188,16 @@ func TestQuotaHeadroom_QuotaSenzaChiaviRilevanti_Ignorata(t *testing.T) {
 	)
 
 	if len(res.Findings) != 0 {
-		t.Fatalf("una quota che non vincola pods/cpu/memory non deve produrre finding, got %+v", res.Findings)
+		t.Fatalf("a quota that does not constrain pods/cpu/memory must not produce findings, got %+v", res.Findings)
 	}
 }
 
-func TestQuotaHeadroom_ListaFallita_Skipped(t *testing.T) {
+func TestQuotaHeadroom_ListFailed_Skipped(t *testing.T) {
 	surge := intstr.FromInt(1)
 	d := deploymentWithRequests(4, &surge, "100m", "128Mi")
 	client := fake.NewSimpleClientset(d)
 	client.PrependReactor("list", "resourcequotas", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, errors.New("forbidden: RBAC nega la lettura delle ResourceQuota")
+		return true, nil, errors.New("forbidden: RBAC denies reading ResourceQuotas")
 	})
 
 	target := check.Target{
@@ -208,12 +208,12 @@ func TestQuotaHeadroom_ListaFallita_Skipped(t *testing.T) {
 
 	res, err := check.QuotaHeadroom{}.Run(context.Background(), target)
 	if err != nil {
-		t.Fatalf("Run() non deve restituire errore su lista fallita, deve degradare a Skipped: %v", err)
+		t.Fatalf("Run() must not return an error on a failed list; it must degrade to Skipped: %v", err)
 	}
 	if !res.Skipped {
-		t.Fatalf("atteso Skipped=true quando la lista delle ResourceQuota non e' accessibile")
+		t.Fatalf("want Skipped=true when the ResourceQuota list is not accessible")
 	}
 	if res.SkipReason == "" {
-		t.Errorf("SkipReason non deve essere vuoto")
+		t.Errorf("SkipReason must not be empty")
 	}
 }

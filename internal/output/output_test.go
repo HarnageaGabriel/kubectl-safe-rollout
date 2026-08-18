@@ -32,23 +32,23 @@ func sampleResults() []output.Group {
 				{
 					CheckID:     "pdb-consistency",
 					Severity:    model.SeverityLow,
-					Cause:       "causa bassa",
+					Cause:       "low-severity cause",
 					Resource:    model.ResourceRef{Kind: "PodDisruptionBudget", Namespace: "default", Name: "a"},
-					Remediation: model.Remediation{Summary: "rimedio basso"},
+					Remediation: model.Remediation{Summary: "low-severity remediation"},
 				},
 				{
 					CheckID:     "pdb-consistency",
 					Severity:    model.SeverityHigh,
-					Cause:       "causa alta",
+					Cause:       "high-severity cause",
 					Resource:    model.ResourceRef{Kind: "PodDisruptionBudget", Namespace: "default", Name: "b"},
-					Remediation: model.Remediation{Summary: "rimedio alto", ContextDependent: true},
+					Remediation: model.Remediation{Summary: "high-severity remediation", ContextDependent: true},
 				},
 			},
 		},
 		{
 			ID:         "quota-headroom",
 			Skipped:    true,
-			SkipReason: "ResourceQuota non accessibile",
+			SkipReason: "ResourceQuota unavailable",
 		},
 		{
 			ID:       "probe-sanity",
@@ -57,15 +57,15 @@ func sampleResults() []output.Group {
 	}
 }
 
-func TestNewReport_OrdinaPerSeveritaDecrescente(t *testing.T) {
+func TestNewReport_SortsByDescendingSeverity(t *testing.T) {
 	r := output.NewReport(sampleResults())
 
 	findings := r.Results[0].Findings
 	if len(findings) != 2 {
-		t.Fatalf("attesi 2 finding nel primo CheckReport, got %d", len(findings))
+		t.Fatalf("expected 2 findings in first CheckReport, got %d", len(findings))
 	}
 	if findings[0].Severity != model.SeverityHigh || findings[1].Severity != model.SeverityLow {
-		t.Errorf("ordine non per severita' decrescente: %v poi %v", findings[0].Severity, findings[1].Severity)
+		t.Errorf("order is not descending by severity: %v then %v", findings[0].Severity, findings[1].Severity)
 	}
 }
 
@@ -74,18 +74,18 @@ func TestReport_MaxSeverity(t *testing.T) {
 
 	sev, ok := r.MaxSeverity()
 	if !ok {
-		t.Fatal("MaxSeverity() ok=false, atteso true: ci sono finding")
+		t.Fatal("MaxSeverity() ok=false, want true: findings are present")
 	}
 	if sev != model.SeverityHigh {
-		t.Errorf("MaxSeverity() = %v, atteso High", sev)
+		t.Errorf("MaxSeverity() = %v, want High", sev)
 	}
 }
 
-func TestReport_MaxSeverity_NessunFinding(t *testing.T) {
+func TestReport_MaxSeverity_NoFindings(t *testing.T) {
 	r := output.NewReport([]output.Group{{ID: "ok-check"}})
 
 	if _, ok := r.MaxSeverity(); ok {
-		t.Error("MaxSeverity() ok=true senza finding, atteso false")
+		t.Error("MaxSeverity() ok=true with no findings, want false")
 	}
 }
 
@@ -99,14 +99,14 @@ func TestRenderJSON_RoundTrip(t *testing.T) {
 
 	var decoded output.Report
 	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
-		t.Fatalf("il JSON prodotto non e' decodificabile: %v\noutput: %s", err, buf.String())
+		t.Fatalf("produced JSON cannot be decoded: %v\noutput: %s", err, buf.String())
 	}
 	if len(decoded.Results) != len(r.Results) {
-		t.Errorf("Results decodificati = %d, attesi %d", len(decoded.Results), len(r.Results))
+		t.Errorf("decoded Results = %d, want %d", len(decoded.Results), len(r.Results))
 	}
 }
 
-func TestRenderJSON_SeveritaComeStringa(t *testing.T) {
+func TestRenderJSON_SeverityAsString(t *testing.T) {
 	r := output.NewReport(sampleResults())
 
 	var buf bytes.Buffer
@@ -114,11 +114,11 @@ func TestRenderJSON_SeveritaComeStringa(t *testing.T) {
 		t.Fatalf("RenderJSON: %v", err)
 	}
 	if !strings.Contains(buf.String(), `"severity": "high"`) {
-		t.Errorf("severity deve essere serializzata come stringa minuscola, output:\n%s", buf.String())
+		t.Errorf("severity must be serialized as a lowercase string, output:\n%s", buf.String())
 	}
 }
 
-func TestRenderSuccess_UmanoEJSON(t *testing.T) {
+func TestRenderSuccess_HumanAndJSON(t *testing.T) {
 	report := output.NewReport(nil)
 	report.Status = "succeeded"
 
@@ -126,8 +126,8 @@ func TestRenderSuccess_UmanoEJSON(t *testing.T) {
 	if err := output.RenderHuman(&human, report); err != nil {
 		t.Fatalf("RenderHuman: %v", err)
 	}
-	if !strings.Contains(human.String(), "SUCCESS rollout completato") {
-		t.Fatalf("output human successo inatteso: %q", human.String())
+	if !strings.Contains(human.String(), "SUCCESS rollout completed") {
+		t.Fatalf("unexpected successful human output: %q", human.String())
 	}
 
 	var jsonOutput bytes.Buffer
@@ -135,11 +135,11 @@ func TestRenderSuccess_UmanoEJSON(t *testing.T) {
 		t.Fatalf("RenderJSON: %v", err)
 	}
 	if !strings.Contains(jsonOutput.String(), `"status": "succeeded"`) {
-		t.Fatalf("output JSON successo inatteso: %s", jsonOutput.String())
+		t.Fatalf("unexpected successful JSON output: %s", jsonOutput.String())
 	}
 }
 
-func TestRenderHuman_ContieneCausaERimedio(t *testing.T) {
+func TestRenderHuman_ContainsCauseAndRemediation(t *testing.T) {
 	r := output.NewReport(sampleResults())
 
 	var buf bytes.Buffer
@@ -148,23 +148,23 @@ func TestRenderHuman_ContieneCausaERimedio(t *testing.T) {
 	}
 	out := buf.String()
 
-	for _, want := range []string{"causa alta", "rimedio alto", "SKIP", "ResourceQuota non accessibile", "OK", "probe-sanity"} {
+	for _, want := range []string{"high-severity cause", "high-severity remediation", "SKIP", "ResourceQuota unavailable", "OK", "probe-sanity"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("output umano non contiene %q:\n%s", want, out)
+			t.Errorf("human output does not contain %q:\n%s", want, out)
 		}
 	}
 }
 
-func TestRenderHuman_FindingNonDeterminato_MarcatoEsplicitamente(t *testing.T) {
+func TestRenderHuman_UndeterminedFinding_MarkedExplicitly(t *testing.T) {
 	r := output.NewReport([]output.Group{
 		{
 			ID: "crashloop",
 			Findings: []model.Finding{{
 				CheckID:      "crashloop-undetermined",
 				Severity:     model.SeverityHigh,
-				Cause:        "causa non chiara",
+				Cause:        "unclear cause",
 				Resource:     model.ResourceRef{Kind: "Pod", Namespace: "default", Name: "app-1"},
-				Remediation:  model.Remediation{Summary: "raccogli piu' contesto", ContextDependent: true},
+				Remediation:  model.Remediation{Summary: "collect more context", ContextDependent: true},
 				Undetermined: true,
 			}},
 		},
@@ -174,7 +174,7 @@ func TestRenderHuman_FindingNonDeterminato_MarcatoEsplicitamente(t *testing.T) {
 	if err := output.RenderHuman(&buf, r); err != nil {
 		t.Fatalf("RenderHuman: %v", err)
 	}
-	if !strings.Contains(buf.String(), "non determinata") {
-		t.Errorf("un finding Undetermined deve essere marcato esplicitamente come non determinato, output:\n%s", buf.String())
+	if !strings.Contains(buf.String(), "undetermined") {
+		t.Errorf("an Undetermined finding must be explicitly marked as undetermined, output:\n%s", buf.String())
 	}
 }

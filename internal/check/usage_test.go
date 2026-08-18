@@ -53,13 +53,13 @@ func podWithRequests(name, cpu, memory string) *corev1.Pod {
 
 func podMetrics(podName, cpuUsage, memUsage string) metricsv1beta1api.PodMetrics {
 	return metricsv1beta1api.PodMetrics{
-		// Labels replica quelle del pod sorgente: un metrics-server reale
-		// le copia sul PodMetrics, ed e' quello che permette alla List
-		// con LabelSelector (usata da RequestsVsUsage per restringere ai
-		// pod del workload) di trovarlo. Senza, il fake clientset generato
-		// (gentype.FakeClientWithList) filtra via selector lato client
-		// sugli oggetti restituiti dai reactor e scarterebbe un oggetto
-		// senza Labels indipendentemente dal reactor.
+		// Labels mirror those of the source pod: a real metrics-server
+		// copies them to PodMetrics, which allows the List with a
+		// LabelSelector (used by RequestsVsUsage to restrict results to
+		// workload pods) to find it. Without them, the generated fake
+		// clientset (gentype.FakeClientWithList) filters reactor-returned
+		// objects client-side by selector and would discard an object
+		// without Labels regardless of the reactor.
 		ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: testNamespace, Labels: podLabels()},
 		Containers: []metricsv1beta1api.ContainerMetrics{{
 			Name: "app",
@@ -71,16 +71,16 @@ func podMetrics(podName, cpuUsage, memUsage string) metricsv1beta1api.PodMetrics
 	}
 }
 
-// metricsClientWith costruisce un fake metrics clientset che risponde
-// alla List di PodMetrics con gli item dati. Non si puo' seminare
-// PodMetrics passandoli a metricsfake.NewSimpleClientset: l'ObjectTracker
-// generico deduce la risorsa dal Kind con una pluralizzazione naive
-// ("PodMetrics" -> qualcosa come "podmetricses"), ma il client tipizzato
-// generato usa davvero la risorsa "pods" nel gruppo metrics.k8s.io (vedi
+// metricsClientWith builds a fake metrics clientset that responds to the
+// PodMetrics List with the given items. PodMetrics cannot be seeded by
+// passing them to metricsfake.NewSimpleClientset: the generic ObjectTracker
+// derives the resource from Kind using naive pluralization ("PodMetrics" ->
+// something like "podmetricses"), while the generated typed client actually
+// uses the "pods" resource in the metrics.k8s.io group (see
 // k8s.io/metrics/.../typed/metrics/v1beta1/fake/fake_podmetrics.go,
-// WithResource("pods")): i due non si incontrano mai, la List
-// risulterebbe sempre vuota. Un reactor che risponde direttamente sulla
-// risorsa "pods" bypassa il problema.
+// WithResource("pods")): the two never meet, so the List would always be
+// empty. A reactor that responds directly on the "pods" resource bypasses
+// the problem.
 func metricsClientWith(items ...metricsv1beta1api.PodMetrics) *metricsfake.Clientset {
 	c := metricsfake.NewSimpleClientset()
 	c.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
@@ -111,7 +111,7 @@ func runUsageCheck(t *testing.T, d *appsv1.Deployment, metricsClient *metricsfak
 
 	res, err := check.RequestsVsUsage{}.Run(context.Background(), target)
 	if err != nil {
-		t.Fatalf("Run() ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Run() returned an unexpected error: %v", err)
 	}
 	return res
 }
@@ -120,69 +120,69 @@ func TestRequestsVsUsage_MetricsClientNil_Skipped(t *testing.T) {
 	res := runUsageCheck(t, deploymentWithSelector(1), nil)
 
 	if !res.Skipped {
-		t.Fatal("atteso Skipped=true quando MetricsClient e' nil")
+		t.Fatal("want Skipped=true when MetricsClient is nil")
 	}
 	if res.SkipReason == "" {
-		t.Error("SkipReason non deve essere vuoto")
+		t.Error("SkipReason must not be empty")
 	}
 }
 
-func TestRequestsVsUsage_NessunPod_NessunFinding(t *testing.T) {
+func TestRequestsVsUsage_NoPods_NoFindings(t *testing.T) {
 	metricsClient := metricsfake.NewSimpleClientset()
 	res := runUsageCheck(t, deploymentWithSelector(1), metricsClient)
 
 	if res.Skipped {
-		t.Fatalf("nessun pod ancora in esecuzione non e' un'impossibilita' di valutare, got skip reason %q", res.SkipReason)
+		t.Fatalf("no pods running yet is not an inability to evaluate, got skip reason %q", res.SkipReason)
 	}
 	if len(res.Findings) != 0 {
-		t.Fatalf("attesi 0 finding senza pod, got %+v", res.Findings)
+		t.Fatalf("want 0 findings without pods, got %+v", res.Findings)
 	}
 }
 
-func TestRequestsVsUsage_UsoEntroLeRequest_NessunFinding(t *testing.T) {
+func TestRequestsVsUsage_UsageWithinRequests_NoFindings(t *testing.T) {
 	pod := podWithRequests("app-1", "500m", "512Mi")
 	metricsClient := metricsClientWith(podMetrics("app-1", "200m", "300Mi"))
 	res := runUsageCheck(t, deploymentWithSelector(1), metricsClient, pod)
 
 	if len(res.Findings) != 0 {
-		t.Fatalf("uso entro le request, attesi 0 finding, got %+v", res.Findings)
+		t.Fatalf("usage within requests: want 0 findings, got %+v", res.Findings)
 	}
 }
 
-func TestRequestsVsUsage_CPUOltreLaRequest_Medium(t *testing.T) {
+func TestRequestsVsUsage_CPUAboveRequest_Medium(t *testing.T) {
 	pod := podWithRequests("app-1", "200m", "512Mi")
 	metricsClient := metricsClientWith(podMetrics("app-1", "500m", "300Mi"))
 	res := runUsageCheck(t, deploymentWithSelector(1), metricsClient, pod)
 
 	if len(res.Findings) != 1 {
-		t.Fatalf("atteso 1 finding per cpu oltre la request, got %+v", res.Findings)
+		t.Fatalf("want 1 finding for CPU above request, got %+v", res.Findings)
 	}
 	f := res.Findings[0]
 	if f.Severity != model.SeverityMedium {
-		t.Errorf("severity = %v, atteso Medium", f.Severity)
+		t.Errorf("severity = %v, want Medium", f.Severity)
 	}
 	if f.CheckID != check.RequestsVsUsageCheckID {
-		t.Errorf("checkID = %q, atteso %q", f.CheckID, check.RequestsVsUsageCheckID)
+		t.Errorf("checkID = %q, want %q", f.CheckID, check.RequestsVsUsageCheckID)
 	}
 	if !f.Remediation.ContextDependent {
-		t.Error("la remediation deve dichiararsi context-dependent")
+		t.Error("remediation must declare itself context-dependent")
 	}
 }
 
-func TestRequestsVsUsage_MemoriaOltreLaRequest_Medium(t *testing.T) {
+func TestRequestsVsUsage_MemoryAboveRequest_Medium(t *testing.T) {
 	pod := podWithRequests("app-1", "500m", "128Mi")
 	metricsClient := metricsClientWith(podMetrics("app-1", "200m", "256Mi"))
 	res := runUsageCheck(t, deploymentWithSelector(1), metricsClient, pod)
 
 	if len(res.Findings) != 1 {
-		t.Fatalf("atteso 1 finding per memoria oltre la request, got %+v", res.Findings)
+		t.Fatalf("want 1 finding for memory above request, got %+v", res.Findings)
 	}
 	if res.Findings[0].Severity != model.SeverityMedium {
-		t.Errorf("severity = %v, atteso Medium", res.Findings[0].Severity)
+		t.Errorf("severity = %v, want Medium", res.Findings[0].Severity)
 	}
 }
 
-func TestRequestsVsUsage_ContainerSenzaRequest_Ignorato(t *testing.T) {
+func TestRequestsVsUsage_ContainerWithoutRequest_Ignored(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "app-1", Namespace: testNamespace, Labels: podLabels()},
 		Spec: corev1.PodSpec{
@@ -193,15 +193,15 @@ func TestRequestsVsUsage_ContainerSenzaRequest_Ignorato(t *testing.T) {
 	res := runUsageCheck(t, deploymentWithSelector(1), metricsClient, pod)
 
 	if len(res.Findings) != 0 {
-		t.Fatalf("un container senza request non deve produrre finding qui, got %+v", res.Findings)
+		t.Fatalf("a container without requests must not produce findings here, got %+v", res.Findings)
 	}
 }
 
-func TestRequestsVsUsage_ListaPodFallita_Skipped(t *testing.T) {
+func TestRequestsVsUsage_PodListFailed_Skipped(t *testing.T) {
 	d := deploymentWithSelector(1)
 	client := fake.NewSimpleClientset(d)
 	client.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, errors.New("forbidden: RBAC nega la lettura dei pod")
+		return true, nil, errors.New("forbidden: RBAC denies reading pods")
 	})
 
 	target := check.Target{
@@ -213,21 +213,21 @@ func TestRequestsVsUsage_ListaPodFallita_Skipped(t *testing.T) {
 
 	res, err := check.RequestsVsUsage{}.Run(context.Background(), target)
 	if err != nil {
-		t.Fatalf("Run() non deve restituire errore su lista pod fallita, deve degradare a Skipped: %v", err)
+		t.Fatalf("Run() must not return an error on a failed pod list; it must degrade to Skipped: %v", err)
 	}
 	if !res.Skipped {
-		t.Fatal("atteso Skipped=true quando la lista dei pod non e' accessibile")
+		t.Fatal("want Skipped=true when the pod list is not accessible")
 	}
 }
 
-func TestRequestsVsUsage_MetrichePodFallite_Skipped(t *testing.T) {
+func TestRequestsVsUsage_PodMetricsFailed_Skipped(t *testing.T) {
 	pod := podWithRequests("app-1", "500m", "512Mi")
 	d := deploymentWithSelector(1)
 	client := fake.NewSimpleClientset(d, pod)
 
 	metricsClient := metricsfake.NewSimpleClientset()
 	metricsClient.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, errors.New("metrics-server non raggiungibile")
+		return true, nil, errors.New("metrics-server is unreachable")
 	})
 
 	target := check.Target{
@@ -239,9 +239,9 @@ func TestRequestsVsUsage_MetrichePodFallite_Skipped(t *testing.T) {
 
 	res, err := check.RequestsVsUsage{}.Run(context.Background(), target)
 	if err != nil {
-		t.Fatalf("Run() non deve restituire errore su metriche non accessibili, deve degradare a Skipped: %v", err)
+		t.Fatalf("Run() must not return an error when metrics are not accessible; it must degrade to Skipped: %v", err)
 	}
 	if !res.Skipped {
-		t.Fatal("atteso Skipped=true quando le metriche pod non sono accessibili")
+		t.Fatal("want Skipped=true when pod metrics are not accessible")
 	}
 }

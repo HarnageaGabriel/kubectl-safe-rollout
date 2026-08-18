@@ -25,22 +25,22 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/model"
 )
 
-// ImagePullSecretsCheckID e' l'identificativo stabile di questa verifica.
+// ImagePullSecretsCheckID is the stable identifier for this check.
 const ImagePullSecretsCheckID = "image-pull-secrets"
 
-// ImagePullSecrets verifica se i container che sembrano usare un registry
-// diverso da Docker Hub hanno imagePullSecrets sul Pod o sul ServiceAccount.
-// Il risultato resta euristico: l'hostname non rivela se il registry richiede
-// davvero autenticazione.
+// ImagePullSecrets checks whether containers that appear to use a registry
+// other than Docker Hub have imagePullSecrets on the Pod or ServiceAccount.
+// The result remains heuristic: the hostname does not reveal whether the
+// registry actually requires authentication.
 type ImagePullSecrets struct{}
 
-// ID implementa check.Check.
+// ID implements check.Check.
 func (ImagePullSecrets) ID() string { return ImagePullSecretsCheckID }
 
-// LooksLikePrivateRegistry applica la regola Docker/containerd che riconosce
-// un registry esplicito dal primo segmento del riferimento immagine. Docker
-// Hub, implicito o espresso come docker.io, e' considerato pubblico per
-// default; la funzione non interroga il registry e non verifica l'accesso.
+// LooksLikePrivateRegistry applies the Docker/containerd rule that identifies
+// an explicit registry from the first segment of the image reference. Docker
+// Hub, implicit or expressed as docker.io, is considered public by default;
+// the function does not query the registry or verify access.
 func LooksLikePrivateRegistry(image string) bool {
 	first, _, found := strings.Cut(image, "/")
 	if !found || first == "docker.io" {
@@ -49,7 +49,7 @@ func LooksLikePrivateRegistry(image string) bool {
 	return first == "localhost" || strings.Contains(first, ".") || strings.Contains(first, ":")
 }
 
-// Run implementa check.Check.
+// Run implements check.Check.
 func (c ImagePullSecrets) Run(ctx context.Context, target Target) (Result, error) {
 	var privateContainers []corev1.Container
 	for _, container := range target.Workload.PodContainers() {
@@ -67,7 +67,7 @@ func (c ImagePullSecrets) Run(ctx context.Context, target Target) (Result, error
 	}
 	serviceAccount, err := target.Client.CoreV1().ServiceAccounts(target.Namespace).Get(ctx, serviceAccountName, metav1.GetOptions{})
 	if err != nil {
-		return Skip(c.ID(), fmt.Sprintf("lettura ServiceAccount %q fallita: %v", serviceAccountName, err)), nil
+		return Skip(c.ID(), fmt.Sprintf("failed to read ServiceAccount %q: %v", serviceAccountName, err)), nil
 	}
 	if len(serviceAccount.ImagePullSecrets) > 0 {
 		return Result{CheckID: c.ID()}, nil
@@ -79,7 +79,7 @@ func (c ImagePullSecrets) Run(ctx context.Context, target Target) (Result, error
 			CheckID:  c.ID(),
 			Severity: model.SeverityLow,
 			Cause: fmt.Sprintf(
-				"il container %q usa l'immagine %q su un registry che non sembra Docker Hub (dedotto esclusivamente dall'hostname, senza verificare il registry), ma ne' il Pod ne' il ServiceAccount %q dichiarano imagePullSecrets",
+				"container %q uses image %q from a registry that does not appear to be Docker Hub (inferred exclusively from the hostname, without checking the registry), but neither the Pod nor ServiceAccount %q declares imagePullSecrets",
 				container.Name, container.Image, serviceAccountName,
 			),
 			Evidence: []string{
@@ -89,7 +89,7 @@ func (c ImagePullSecrets) Run(ctx context.Context, target Target) (Result, error
 			},
 			Remediation: model.Remediation{
 				Summary: fmt.Sprintf(
-					"se il registry dell'immagine %q richiede autenticazione, aggiungi un imagePullSecret al pod template o al ServiceAccount %q; se il registry e' pubblico su un dominio personalizzato, questo finding e' un falso positivo perche' la deduzione usa solo l'hostname",
+					"if the registry for image %q requires authentication, add an imagePullSecret to the pod template or ServiceAccount %q; if the registry is public on a custom domain, this finding is a false positive because the inference uses only the hostname",
 					container.Image, serviceAccountName,
 				),
 				ContextDependent: true,
