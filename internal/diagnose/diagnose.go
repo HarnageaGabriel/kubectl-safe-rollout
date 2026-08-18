@@ -39,13 +39,12 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/workload"
 )
 
-// LogTailer retrieves the last log lines from the previous container,
-// used as additional evidence for CrashLoopBackOff causes. It never
+// LogTailer retrieves the last log lines from the previous container or init
+// container, used as additional evidence for repeated failures. It never
 // affects classification, which relies only on structured signals
-// (ContainerStatus) and Events: if the fetch fails or LogTailer is nil,
-// the Finding remains valid, only with one less evidence line. It is an
-// interface, not a concrete client, to remain testable without a real
-// API server.
+// (ContainerStatus) and Events: if the fetch fails or LogTailer is nil, the
+// Finding remains valid, only with one less evidence line. It is an interface,
+// not a concrete client, to remain testable without a real API server.
 type LogTailer interface {
 	PreviousLogTail(ctx context.Context, namespace, pod, container string, lines int64) (string, error)
 }
@@ -112,6 +111,9 @@ func registeredDiagnosers() []Diagnoser {
 	return []Diagnoser{
 		CrashLoop{},
 		ImagePull{},
+		ConfigError{},
+		VolumeMount{},
+		InitContainer{},
 		Pending{},
 		Quota{},
 		ProgressDeadline{},

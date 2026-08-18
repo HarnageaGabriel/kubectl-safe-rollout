@@ -62,7 +62,7 @@ func (ProgressDeadline) Diagnose(_ context.Context, target Target) (Result, erro
 			// the other Diagnosers. Suggesting it as a ready-made command
 			// would normalize an action that must remain an explicit operator
 			// decision, not a copy-paste operation.
-			Summary:          "inspect the rollout pods (likely in CrashLoopBackOff, ImagePullBackOff, or Pending: the other Diagnosers in this command classify them separately) or consider a rollback with `kubectl rollout undo` if the previous release was stable",
+			Summary:          "the other Diagnosers in this command classify this rollout's pods separately; if none reported a cause, inspect the pods directly because the cause is outside what this tool classifies today, or consider a rollback with `kubectl rollout undo` if the previous release was stable",
 			ContextDependent: true,
 		},
 		Resource: resource,

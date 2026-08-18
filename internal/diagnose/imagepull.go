@@ -28,12 +28,10 @@ import (
 // Result.DiagnoserID.
 const ImagePullDiagnoserID = "imagepull"
 
-// ImagePull classifies containers in ImagePullBackOff/ErrImagePull,
-// distinguishing a missing tag/digest, an unreachable registry, and
-// missing credentials. The structured signal (ContainerState.Waiting.
-// Reason) only identifies that the pull fails; the reason is in the text
-// of the associated Reason=="Failed" event, isolated in
-// internal/diagnose/pattern.
+// ImagePull classifies containers in ImagePullBackOff/ErrImagePull or with
+// InvalidImageName. An invalid reference is identified by its structured
+// Waiting.Reason; existing pull failures still use the associated event text
+// isolated in internal/diagnose/pattern.
 type ImagePull struct{}
 
 // ID implements Diagnoser.
@@ -48,6 +46,10 @@ func (d ImagePull) Diagnose(_ context.Context, target Target) (Result, error) {
 				continue
 			}
 			reason := cs.State.Waiting.Reason
+			if reason == "InvalidImageName" {
+				findings = append(findings, d.invalidReference(pod, cs))
+				continue
+			}
 			if reason != "ImagePullBackOff" && reason != "ErrImagePull" {
 				continue
 			}
@@ -55,6 +57,29 @@ func (d ImagePull) Diagnose(_ context.Context, target Target) (Result, error) {
 		}
 	}
 	return Result{DiagnoserID: d.ID(), Findings: findings}, nil
+}
+
+func (ImagePull) invalidReference(pod corev1.Pod, cs corev1.ContainerStatus) model.Finding {
+	resource := model.ResourceRef{Kind: "Pod", Namespace: pod.Namespace, Name: pod.Name}
+	return model.Finding{
+		CheckID:  string(CauseImagePullInvalidReference),
+		Severity: model.SeverityHigh,
+		Cause: fmt.Sprintf(
+			"container %q in %s cannot start because image reference %q is malformed",
+			cs.Name, resource, cs.Image,
+		),
+		Evidence: []string{
+			fmt.Sprintf("container=%s", cs.Name),
+			fmt.Sprintf("image=%s", cs.Image),
+			fmt.Sprintf("waitingReason=%s", cs.State.Waiting.Reason),
+			fmt.Sprintf("waitingMessage=%s", cs.State.Waiting.Message),
+		},
+		Remediation: model.Remediation{
+			Summary:          fmt.Sprintf("correct malformed image reference %q: no registry was contacted, no credential or network problem is involved, and retrying or adding an imagePullSecret cannot help", cs.Image),
+			ContextDependent: true,
+		},
+		Resource: resource,
+	}
 }
 
 func (d ImagePull) classify(pod corev1.Pod, cs corev1.ContainerStatus, events []corev1.Event) model.Finding {

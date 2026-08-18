@@ -20,6 +20,34 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/diagnose/pattern"
 )
 
+func TestMissingConfigObject_CreateContainerConfigErrorConfigMap(t *testing.T) {
+	kind, name, ok := pattern.MissingConfigObject(`configmap "does-not-exist" not found`)
+	if !ok || kind != "configmap" || name != "does-not-exist" {
+		t.Fatalf("kind=%q name=%q ok=%v, expected configmap does-not-exist", kind, name, ok)
+	}
+}
+
+func TestMissingConfigObject_CreateContainerConfigErrorSecret(t *testing.T) {
+	kind, name, ok := pattern.MissingConfigObject(`secret "missing-secret" not found`)
+	if !ok || kind != "secret" || name != "missing-secret" {
+		t.Fatalf("kind=%q name=%q ok=%v, expected secret missing-secret", kind, name, ok)
+	}
+}
+
+func TestMissingConfigObject_FailedMount(t *testing.T) {
+	kind, name, ok := pattern.MissingConfigObject(`MountVolume.SetUp failed for volume "creds" : secret "missing-secret" not found`)
+	if !ok || kind != "secret" || name != "missing-secret" {
+		t.Fatalf("kind=%q name=%q ok=%v, expected secret missing-secret", kind, name, ok)
+	}
+}
+
+func TestMissingConfigObject_UnrecognizedMessage(t *testing.T) {
+	_, _, ok := pattern.MissingConfigObject(`MountVolume.SetUp failed for volume "data": rpc error`)
+	if ok {
+		t.Fatal("expected ok=false for a message without a missing ConfigMap or Secret")
+	}
+}
+
 func TestImagePullFailure_TagNotFound(t *testing.T) {
 	cause, ok := pattern.ImagePullFailure(`Failed to pull image "registry.example.com/app:v9.9.9": rpc error: code = NotFound desc = failed to pull and unpack image: failed to resolve reference: manifest unknown`)
 	if !ok || cause != "tag-not-found" {
