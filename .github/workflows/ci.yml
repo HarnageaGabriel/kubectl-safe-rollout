@@ -105,7 +105,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Merge commits are skipped because their sign-off is not required.
+      # Two kinds of commit are exempt.
+      #
+      # Merge commits carry no sign-off requirement of their own.
+      #
+      # Bot commits are exempt because the DCO certifies that a person has
+      # the right to submit the code they are contributing, and a bot
+      # bumping a version constraint in go.mod is not contributing anyone
+      # else's authorship. Without this, every Dependabot pull request would
+      # be permanently unmergeable: Dependabot does not sign off, and it
+      # force-pushes over any amend, so there is no way for a human to fix
+      # it once and have it stay fixed.
       - name: Verify commit sign-offs
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -117,6 +127,11 @@ jobs:
             if [ "$(wc -w <<< "$parents")" -gt 1 ]; then
               continue
             fi
+
+            author=$(git log -1 --format='%an' "$sha")
+            case "$author" in
+              *'[bot]') continue ;;
+            esac
 
             if ! git log -1 --format='%B' "$sha" \
               | git interpret-trailers --parse \
