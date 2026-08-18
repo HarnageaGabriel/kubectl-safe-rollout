@@ -142,3 +142,28 @@ func watchAndExpectCause(t *testing.T, client kubernetes.Interface, namespace st
 	}
 	t.Fatalf("cause %q not found among Results: %+v", causeID, outcome.Results)
 }
+
+// watchAndExpectSuccess runs diagnose.Watch against the real cluster and
+// verifies that the rollout completes without any Finding. This protects
+// slow-starting applications from readiness false positives.
+func watchAndExpectSuccess(t *testing.T, client kubernetes.Interface, namespace string, d *appsv1.Deployment, timeout time.Duration) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	outcome, err := diagnose.Watch(ctx, diagnose.WatchTarget{
+		Namespace: namespace,
+		Workload:  workload.FromDeployment(d),
+		Client:    client,
+	})
+	if err != nil {
+		t.Fatalf("Watch returned an unexpected error: %v", err)
+	}
+	findings := diagnose.AllFindings(outcome.Results)
+	if len(findings) != 0 {
+		t.Fatalf("Watch reported findings for a successful rollout: %+v", findings)
+	}
+	if !outcome.Succeeded {
+		t.Fatalf("Watch did not report success: %+v", outcome)
+	}
+}

@@ -27,6 +27,30 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/diagnose"
 )
 
+// TestWatchE2E_InitContainerApplicationExit verifies
+// initcontainer-app-error: an init container repeatedly exits with a
+// non-zero application code, preventing the main container from starting.
+func TestWatchE2E_InitContainerApplicationExit(t *testing.T) {
+	client := newE2EClient(t)
+	ns := newE2ENamespace(t, client)
+
+	podSpec := corev1.PodSpec{
+		InitContainers: []corev1.Container{{
+			Name:    "migrate",
+			Image:   "busybox:1.36",
+			Command: []string{"sh", "-c", "echo 'migration failed: cannot reach db'; exit 3"},
+		}},
+		Containers: []corev1.Container{{
+			Name:    "app",
+			Image:   "busybox:1.36",
+			Command: []string{"sh", "-c", "sleep 3600"},
+		}},
+	}
+	d := deployWorkload(t, client, ns, "init-app-error", 1, podSpec, nil)
+
+	watchAndExpectCause(t, client, ns, d, diagnose.CauseInitContainerAppError, 2*time.Minute)
+}
+
 // TestWatchE2E_CrashLoopApplicationExit verifies crashloop-app-error:
 // a container that exits immediately with an application exit code,
 // neither OOMKilled nor killed by the liveness probe.

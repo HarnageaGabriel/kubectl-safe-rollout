@@ -86,6 +86,46 @@ func TestCrashLoop_LivenessProbe_TakesPrecedenceOverGenericTerminated(t *testing
 	}
 }
 
+func TestCrashLoop_LivenessProbeKillingWithoutCrashLoopBackOff(t *testing.T) {
+	pods := []corev1.Pod{podWith("app-1", "app-1-uid", corev1.PodRunning, corev1.ContainerStatus{
+		Name:         "app",
+		RestartCount: 2,
+		State:        corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+	})}
+	events := []corev1.Event{
+		event("app-1-uid", "Killing", "Container app failed liveness probe, will be restarted"),
+	}
+	target := newTarget(t, pods, events, nil)
+
+	res, err := diagnose.CrashLoop{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d: %+v", len(res.Findings), res.Findings)
+	}
+	if res.Findings[0].CheckID != string(diagnose.CauseCrashLoopLivenessProbe) {
+		t.Errorf("CheckID = %q, expected %q", res.Findings[0].CheckID, diagnose.CauseCrashLoopLivenessProbe)
+	}
+}
+
+func TestCrashLoop_RestartWithoutLivenessEventIsNotEnough(t *testing.T) {
+	pods := []corev1.Pod{podWith("app-1", "app-1-uid", corev1.PodRunning, corev1.ContainerStatus{
+		Name:         "app",
+		RestartCount: 1,
+		State:        corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+	})}
+	target := newTarget(t, pods, nil, nil)
+
+	res, err := diagnose.CrashLoop{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if len(res.Findings) != 0 {
+		t.Fatalf("a restart without a liveness Killing event must not produce findings, got %+v", res.Findings)
+	}
+}
+
 func TestCrashLoop_ApplicationError(t *testing.T) {
 	pods := []corev1.Pod{podWith("app-1", "app-1-uid", corev1.PodRunning, corev1.ContainerStatus{
 		Name:         "app",
