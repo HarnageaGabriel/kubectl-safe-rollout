@@ -38,9 +38,24 @@ jobs:
       - name: go vet
         run: go vet ./...
 
-      - uses: golangci/golangci-lint-action@v6
+      # Pinned to the v2 line of golangci-lint, and to the action major that
+      # installs it. The v6 action resolves "latest" inside the v1 line, and
+      # v1 is built with go1.24: against this module it fails before linting
+      # anything with "the Go language version used to build golangci-lint is
+      # lower than the targeted Go version". It also cannot read the
+      # `version: "2"` schema in .golangci.yml.
+      - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.12.2
+
+      # The e2e scenarios are behind a build tag, so the default run never
+      # type-checks them. Linting them separately is what keeps a broken e2e
+      # file from being discovered only when someone has a cluster to run it.
+      - name: golangci-lint (e2e build tag)
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.2
+          args: --build-tags e2e
 
   test:
     name: Test
