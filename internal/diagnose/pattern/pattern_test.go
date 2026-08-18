@@ -23,109 +23,108 @@ import (
 func TestImagePullFailure_TagNotFound(t *testing.T) {
 	cause, ok := pattern.ImagePullFailure(`Failed to pull image "registry.example.com/app:v9.9.9": rpc error: code = NotFound desc = failed to pull and unpack image: failed to resolve reference: manifest unknown`)
 	if !ok || cause != "tag-not-found" {
-		t.Fatalf("cause=%q ok=%v, atteso tag-not-found", cause, ok)
+		t.Fatalf("cause=%q ok=%v, expected tag-not-found", cause, ok)
 	}
 }
 
-// TestImagePullFailure_TagNotFound_ContainerdReale usa il messaggio
-// esatto osservato su kind v0.32 / containerd 2.2 (test/e2e,
-// TestWatchE2E_ImageTagInesistente): il formato "manifest unknown" del
-// test sopra copre containerd 1.x/CRI-O piu' vecchi, questo copre le
-// versioni attuali. Entrambi restano perche' entrambi si osservano in
-// pratica a seconda del cluster.
-func TestImagePullFailure_TagNotFound_ContainerdReale(t *testing.T) {
+// TestImagePullFailure_TagNotFound_RealContainerd uses the exact message
+// observed on kind v0.32 / containerd 2.2 (test/e2e,
+// TestWatchE2E_ImageTagInesistente): the "manifest unknown" format in the
+// test above covers older containerd 1.x/CRI-O versions; this one covers
+// current versions. Both remain because both occur in practice depending
+// on the cluster.
+func TestImagePullFailure_TagNotFound_RealContainerd(t *testing.T) {
 	cause, ok := pattern.ImagePullFailure(`Failed to pull image "busybox:questo-tag-non-esiste-v99": rpc error: code = NotFound desc = failed to pull and unpack image "docker.io/library/busybox:questo-tag-non-esiste-v99": failed to resolve reference "docker.io/library/busybox:questo-tag-non-esiste-v99": docker.io/library/busybox:questo-tag-non-esiste-v99: not found`)
 	if !ok || cause != "tag-not-found" {
-		t.Fatalf("cause=%q ok=%v, atteso tag-not-found", cause, ok)
+		t.Fatalf("cause=%q ok=%v, expected tag-not-found", cause, ok)
 	}
 }
 
-// TestImagePullFailure_Unauthorized usa il messaggio reale osservato su
-// kind per un repository privato/inesistente su Docker Hub senza
-// imagePullSecrets (test/e2e, TestWatchE2E_CredenzialiRegistryMancanti).
-// Contiene anche "failed to resolve reference", lo stesso prefisso
-// generico del messaggio di tag-not-found: e' il caso che ha reso
-// necessario escludere quel prefisso dal pattern di tag-not-found (vedi
-// il commento in pattern.go).
+// TestImagePullFailure_Unauthorized uses the real message observed on kind
+// for a private/nonexistent Docker Hub repository without imagePullSecrets
+// (test/e2e, TestWatchE2E_CredenzialiRegistryMancanti). It also contains
+// "failed to resolve reference", the same generic prefix as the
+// tag-not-found message: this case made it necessary to exclude that prefix
+// from the tag-not-found pattern (see the comment in pattern.go).
 func TestImagePullFailure_Unauthorized(t *testing.T) {
 	cause, ok := pattern.ImagePullFailure(`Failed to pull image "docker.io/kubectlsaferolloute2e/repo-privata-inesistente:v1": failed to pull and unpack image "docker.io/kubectlsaferolloute2e/repo-privata-inesistente:v1": failed to resolve reference "docker.io/kubectlsaferolloute2e/repo-privata-inesistente:v1": pull access denied, repository does not exist or may require authorization: server message: insufficient_scope: authorization failed`)
 	if !ok || cause != "unauthorized" {
-		t.Fatalf("cause=%q ok=%v, atteso unauthorized", cause, ok)
+		t.Fatalf("cause=%q ok=%v, expected unauthorized", cause, ok)
 	}
 }
 
-// TestImagePullFailure_RegistryUnreachable usa il messaggio reale
-// osservato su kind per un hostname di registry che non risolve via DNS
-// (test/e2e, TestWatchE2E_RegistryNonRaggiungibile). Stessa nota sul
-// prefisso "failed to resolve reference" del test precedente.
+// TestImagePullFailure_RegistryUnreachable uses the real message observed
+// on kind for a registry hostname that DNS cannot resolve (test/e2e,
+// TestWatchE2E_RegistryNonRaggiungibile). Same note about the
+// "failed to resolve reference" prefix as in the previous test.
 func TestImagePullFailure_RegistryUnreachable(t *testing.T) {
 	cause, ok := pattern.ImagePullFailure(`Failed to pull image "registry.invalid.safe-rollout-e2e.example/app:v1": failed to pull and unpack image "registry.invalid.safe-rollout-e2e.example/app:v1": failed to resolve reference "registry.invalid.safe-rollout-e2e.example/app:v1": failed to do request: Head "https://registry.invalid.safe-rollout-e2e.example/v2/app/manifests/v1": dial tcp: lookup registry.invalid.safe-rollout-e2e.example on 192.168.65.254:53: no such host`)
 	if !ok || cause != "registry-unreachable" {
-		t.Fatalf("cause=%q ok=%v, atteso registry-unreachable", cause, ok)
+		t.Fatalf("cause=%q ok=%v, expected registry-unreachable", cause, ok)
 	}
 }
 
-func TestImagePullFailure_MessaggioNonRiconosciuto(t *testing.T) {
+func TestImagePullFailure_UnrecognizedMessage(t *testing.T) {
 	_, ok := pattern.ImagePullFailure("qualcosa che non abbiamo mai visto prima")
 	if ok {
-		t.Fatal("atteso ok=false per un messaggio senza pattern noto")
+		t.Fatal("expected ok=false for a message without a known pattern")
 	}
 }
 
-func TestLivenessKilling_Combacia(t *testing.T) {
+func TestLivenessKilling_Matches(t *testing.T) {
 	if !pattern.LivenessKilling("Killing", "Container app failed liveness probe, will be restarted", "app") {
-		t.Fatal("atteso match per evento Killing con messaggio di liveness probe")
+		t.Fatal("expected a match for a Killing event with a liveness probe message")
 	}
 }
 
-func TestLivenessKilling_ReasonDiverso(t *testing.T) {
+func TestLivenessKilling_DifferentReason(t *testing.T) {
 	if pattern.LivenessKilling("Unhealthy", "Liveness probe failed: HTTP probe failed with statuscode: 500", "app") {
-		t.Fatal("Reason=Unhealthy non deve combaciare: e' il fallimento della probe, non l'uccisione del container")
+		t.Fatal("Reason=Unhealthy must not match: it is the probe failure, not the container being killed")
 	}
 }
 
-func TestLivenessKilling_ContainerDiverso(t *testing.T) {
+func TestLivenessKilling_DifferentContainer(t *testing.T) {
 	if pattern.LivenessKilling("Killing", "Container sidecar failed liveness probe, will be restarted", "app") {
-		t.Fatal("il messaggio menziona un container diverso, non deve combaciare per 'app'")
+		t.Fatal("the message mentions a different container; it must not match 'app'")
 	}
 }
 
-func TestFailedScheduling_RisorseInsufficienti(t *testing.T) {
+func TestFailedScheduling_InsufficientResources(t *testing.T) {
 	cause, ok := pattern.FailedScheduling("0/5 nodes are available: 5 Insufficient cpu.")
 	if !ok || cause != "insufficient-resources" {
-		t.Fatalf("cause=%q ok=%v, atteso insufficient-resources", cause, ok)
+		t.Fatalf("cause=%q ok=%v, expected insufficient-resources", cause, ok)
 	}
 }
 
-func TestFailedScheduling_VincoliScheduling(t *testing.T) {
+func TestFailedScheduling_SchedulingConstraints(t *testing.T) {
 	cause, ok := pattern.FailedScheduling("0/5 nodes are available: 5 node(s) didn't match Pod's node affinity/selector.")
 	if !ok || cause != "scheduling-constraints" {
-		t.Fatalf("cause=%q ok=%v, atteso scheduling-constraints", cause, ok)
+		t.Fatalf("cause=%q ok=%v, expected scheduling-constraints", cause, ok)
 	}
 }
 
-func TestFailedScheduling_PVCNonBound(t *testing.T) {
+func TestFailedScheduling_PVCUnbound(t *testing.T) {
 	cause, ok := pattern.FailedScheduling("0/5 nodes are available: pod has unbound immediate PersistentVolumeClaims.")
 	if !ok || cause != "unbound-pvc" {
-		t.Fatalf("cause=%q ok=%v, atteso unbound-pvc", cause, ok)
+		t.Fatalf("cause=%q ok=%v, expected unbound-pvc", cause, ok)
 	}
 }
 
-func TestFailedScheduling_MessaggioNonRiconosciuto(t *testing.T) {
+func TestFailedScheduling_UnrecognizedMessage(t *testing.T) {
 	_, ok := pattern.FailedScheduling("qualcosa che non abbiamo mai visto prima")
 	if ok {
-		t.Fatal("atteso ok=false per un messaggio senza pattern noto")
+		t.Fatal("expected ok=false for a message without a known pattern")
 	}
 }
 
-func TestQuotaExceeded_Combacia(t *testing.T) {
+func TestQuotaExceeded_Matches(t *testing.T) {
 	if !pattern.QuotaExceeded(`pods "app-abc123" is forbidden: exceeded quota: compute-quota, requested: limits.cpu=1, used: limits.cpu=4, limited: limits.cpu=4`) {
-		t.Fatal("atteso match per messaggio di quota superata")
+		t.Fatal("expected a match for a quota exceeded message")
 	}
 }
 
-func TestQuotaExceeded_MessaggioDiverso(t *testing.T) {
+func TestQuotaExceeded_DifferentMessage(t *testing.T) {
 	if pattern.QuotaExceeded(`admission webhook "policy.example.com" denied the request`) {
-		t.Fatal("un rifiuto da webhook non e' una quota superata")
+		t.Fatal("a webhook rejection is not a quota exceeded message")
 	}
 }

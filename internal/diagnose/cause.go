@@ -14,91 +14,86 @@
 
 package diagnose
 
-// CauseID identifica in modo stabile una causa classificata di
-// fallimento o stallo di un rollout. E' il valore che ogni Diagnoser
-// scrive in model.Finding.CheckID (non "crashloop", il nome della
-// categoria: la causa specifica, es. "crashloop-oomkilled"), cosi' chi
-// consuma l'output json puo' fare gating in CI su una singola causa
-// invece che sull'intera categoria.
+// CauseID is the stable identifier for a classified cause of rollout
+// failure or stall. It is the value that every Diagnoser writes to
+// model.Finding.CheckID (not "crashloop", the category name: the specific
+// cause, e.g. "crashloop-oomkilled"), so consumers of the JSON output can
+// gate in CI on a single cause rather than the entire category.
 //
-// Ogni categoria (crashloop, imagepull, pending) ha una propria
-// variante "-undetermined": e' la causa che un Diagnoser riporta quando
-// l'evidenza disponibile conferma che il rollout e' bloccato ma non
-// basta a distinguere tra le cause note della categoria. Non esiste un
-// valore CauseID generico per "non determinato senza contesto": il
-// vincolo di determinismo del progetto richiede che anche un
-// non-determinato dichiari almeno la categoria in cui e' stato
-// osservato, mai un'etichetta vuota.
+// Every category (crashloop, imagepull, pending) has its own
+// "-undetermined" variant: it is the cause a Diagnoser reports when the
+// available evidence confirms that the rollout is blocked but is not
+// enough to distinguish among the category's known causes. There is no
+// generic CauseID value for "undetermined without context": the project's
+// determinism constraint requires even an undetermined cause to declare at
+// least the category where it was observed, never an empty label.
 type CauseID string
 
 const (
-	// CauseCrashLoopOOMKilled il container viene ucciso dal kernel per
-	// superamento del limite di memoria. Segnale strutturato
-	// (ContainerStateTerminated.Reason == "OOMKilled"), nessun parsing
-	// di testo libero necessario.
+	// CauseCrashLoopOOMKilled means the kernel kills the container for
+	// exceeding its memory limit. Structured signal
+	// (ContainerStateTerminated.Reason == "OOMKilled"), no free-text
+	// parsing required.
 	CauseCrashLoopOOMKilled CauseID = "crashloop-oomkilled"
-	// CauseCrashLoopLivenessProbe il kubelet termina il container
-	// perche' la liveness probe fallisce ripetutamente, non perche'
-	// l'app crasha da sola. Segnale: evento Reason=="Killing" con
-	// messaggio che menziona la liveness probe.
+	// CauseCrashLoopLivenessProbe means the kubelet terminates the
+	// container because the liveness probe repeatedly fails, not because
+	// the app crashes on its own. Signal: event Reason=="Killing" with a
+	// message mentioning the liveness probe.
 	CauseCrashLoopLivenessProbe CauseID = "crashloop-liveness-probe"
-	// CauseCrashLoopAppError il container termina con un exit code
-	// applicativo, ne' OOMKilled ne' ucciso dalla probe.
+	// CauseCrashLoopAppError means the container exits with an application
+	// exit code, neither OOMKilled nor killed by the probe.
 	CauseCrashLoopAppError CauseID = "crashloop-app-error"
-	// CauseCrashLoopUndetermined il container e' in CrashLoopBackOff
-	// ma l'evidenza disponibile (LastTerminationState assente o
-	// Reason vuoto, nessun evento di Killing per liveness) non permette
-	// di scegliere tra le tre cause sopra.
+	// CauseCrashLoopUndetermined means the container is in
+	// CrashLoopBackOff but the available evidence (missing
+	// LastTerminationState or empty Reason, no Killing event for liveness)
+	// does not allow choosing among the three causes above.
 	CauseCrashLoopUndetermined CauseID = "crashloop-undetermined"
 
-	// CauseImagePullTagNotFound il tag o il digest richiesto non
-	// esiste sul registry.
+	// CauseImagePullTagNotFound means the requested tag or digest does not
+	// exist in the registry.
 	CauseImagePullTagNotFound CauseID = "imagepull-tag-not-found"
-	// CauseImagePullRegistryUnreachable il registry non risponde (DNS,
-	// rete, timeout), non e' un problema di autorizzazione o di tag.
+	// CauseImagePullRegistryUnreachable means the registry does not respond
+	// (DNS, network, timeout); this is not an authorization or tag issue.
 	CauseImagePullRegistryUnreachable CauseID = "imagepull-registry-unreachable"
-	// CauseImagePullUnauthorized il pull viene rifiutato per
-	// autenticazione/autorizzazione mancante o insufficiente
-	// (imagePullSecrets assente o scaduto).
+	// CauseImagePullUnauthorized means the pull is rejected because
+	// authentication/authorization is missing or insufficient
+	// (imagePullSecrets is missing or expired).
 	CauseImagePullUnauthorized CauseID = "imagepull-credentials-missing"
-	// CauseImagePullUndetermined il container e' in
-	// ImagePullBackOff/ErrImagePull ma il messaggio dell'evento Failed
-	// non combacia con nessun pattern noto (runtime o formato di
-	// messaggio non previsto).
+	// CauseImagePullUndetermined means the container is in
+	// ImagePullBackOff/ErrImagePull but the Failed event message matches no
+	// known pattern (unexpected runtime or message format).
 	CauseImagePullUndetermined CauseID = "imagepull-undetermined"
 
-	// CausePendingInsufficientResources nessun nodo ha CPU/memoria/
-	// storage effimero sufficiente per lo scheduling.
+	// CausePendingInsufficientResources means no node has enough CPU,
+	// memory, or ephemeral storage for scheduling.
 	CausePendingInsufficientResources CauseID = "pending-insufficient-resources"
-	// CausePendingSchedulingConstraints nodeSelector, affinity o
-	// taint/toleration impediscono lo scheduling su qualunque nodo
-	// disponibile.
+	// CausePendingSchedulingConstraints means nodeSelector, affinity, or
+	// taint/toleration prevents scheduling on every available node.
 	CausePendingSchedulingConstraints CauseID = "pending-scheduling-constraints"
-	// CausePendingUnboundPVC il pod referenzia una
-	// PersistentVolumeClaim non ancora Bound (o inesistente). Segnale
-	// strutturato: PersistentVolumeClaim.Status.Phase, non un pattern
-	// di testo.
+	// CausePendingUnboundPVC means the pod references a
+	// PersistentVolumeClaim that is not yet Bound (or does not exist).
+	// Structured signal: PersistentVolumeClaim.Status.Phase, not a text
+	// pattern.
 	CausePendingUnboundPVC CauseID = "pending-unbound-pvc"
-	// CausePendingUndetermined il pod e' Pending ma non c'e' un evento
-	// FailedScheduling riconoscibile ne' una PVC non bound referenziata.
+	// CausePendingUndetermined means the pod is Pending but has no
+	// recognizable FailedScheduling event or referenced unbound PVC.
 	CausePendingUndetermined CauseID = "pending-undetermined"
 
-	// CauseQuotaExceeded il ReplicaSet non riesce a creare pod perche'
-	// l'admission plugin di ResourceQuota rifiuta la richiesta. Non
-	// osservabile sui Pod (non arrivano a esistere): osservabile solo
-	// come evento Reason=="FailedCreate" sul ReplicaSet.
+	// CauseQuotaExceeded means the ReplicaSet cannot create pods because
+	// the ResourceQuota admission plugin rejects the request. Not
+	// observable on Pods (they never exist): observable only as a
+	// Reason=="FailedCreate" event on the ReplicaSet.
 	CauseQuotaExceeded CauseID = "quota-exceeded"
-	// CauseQuotaUndetermined il ReplicaSet ha un evento FailedCreate
-	// ma il messaggio non menziona una quota superata (potrebbe essere
-	// un webhook di ammissione o un altro rifiuto): il fallimento nella
-	// creazione dei pod e' comunque un segnale reale da riportare, la
-	// causa specifica no.
+	// CauseQuotaUndetermined means the ReplicaSet has a FailedCreate event
+	// but the message does not mention an exceeded quota (it could be an
+	// admission webhook or another rejection): the failure to create pods
+	// is still a real signal to report, but the specific cause is not.
 	CauseQuotaUndetermined CauseID = "quota-undetermined"
 
-	// CauseProgressDeadlineExceeded il controller del Deployment ha
-	// gia' concluso, per conto proprio, che il rollout non progredisce
-	// entro spec.progressDeadlineSeconds. Non c'e' ambiguita' da
-	// risolvere qui: la condizione stessa e' la causa, letta da
-	// Status.Conditions, non derivata da un pattern di testo.
+	// CauseProgressDeadlineExceeded means the Deployment controller has
+	// already concluded on its own that the rollout is not progressing
+	// within spec.progressDeadlineSeconds. There is no ambiguity to resolve
+	// here: the condition itself is the cause, read from Status.Conditions,
+	// not derived from a text pattern.
 	CauseProgressDeadlineExceeded CauseID = "progress-deadline-exceeded"
 )

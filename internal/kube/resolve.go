@@ -25,12 +25,12 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/workload"
 )
 
-// ResolveWorkload interpreta un riferimento nella forma "<kind>/<name>"
-// (la stessa sintassi accettata da `kubectl get`) e recupera l'oggetto
-// live corrispondente. Nell'MVP e' supportato solo Deployment: gli altri
-// kind restituiscono un errore esplicito invece di un comportamento
-// silenziosamente parziale, cosi' chi lo usa sa che deve aspettare
-// supporto futuro invece di fidarsi di un risultato incompleto.
+// ResolveWorkload interprets a reference in the form "<kind>/<name>"
+// (the same syntax accepted by `kubectl get`) and retrieves the corresponding
+// live object. Only Deployment is supported in the MVP: other kinds return an
+// explicit error instead of silently providing partial behavior, so users
+// know they must wait for future support instead of trusting an incomplete
+// result.
 func ResolveWorkload(ctx context.Context, clientset kubernetes.Interface, namespace, ref string) (workload.Workload, error) {
 	kind, name, err := splitRef(ref)
 	if err != nil {
@@ -41,18 +41,18 @@ func ResolveWorkload(ctx context.Context, clientset kubernetes.Interface, namesp
 	case "deployment", "deployments", "deploy", "deploy.apps", "deployment.apps":
 		d, err := clientset.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
-			return nil, fmt.Errorf("lettura Deployment %s/%s: %w", namespace, name, err)
+			return nil, fmt.Errorf("reading Deployment %s/%s: %w", namespace, name, err)
 		}
 		return workload.FromDeployment(d), nil
 	default:
-		return nil, fmt.Errorf("kind %q non supportato in questa versione (MVP copre solo Deployment)", kind)
+		return nil, fmt.Errorf("kind %q is not supported in this version (MVP only supports Deployment)", kind)
 	}
 }
 
 func splitRef(ref string) (kind, name string, err error) {
 	parts := strings.SplitN(ref, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", fmt.Errorf("riferimento %q non valido, atteso <kind>/<name> (es. deployment/api)", ref)
+		return "", "", fmt.Errorf("invalid reference %q, expected <kind>/<name> (e.g. deployment/api)", ref)
 	}
 	return parts[0], parts[1], nil
 }

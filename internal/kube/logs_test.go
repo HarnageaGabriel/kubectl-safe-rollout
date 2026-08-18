@@ -22,7 +22,7 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/kube"
 )
 
-func TestPreviousLogTailer_UsaSubresourceLog(t *testing.T) {
+func TestPreviousLogTailer_UsesLogSubresource(t *testing.T) {
 	client := fake.NewSimpleClientset()
 	tailer := kube.PreviousLogTailer{Client: client}
 
@@ -31,10 +31,10 @@ func TestPreviousLogTailer_UsaSubresourceLog(t *testing.T) {
 		t.Fatalf("PreviousLogTail: %v", err)
 	}
 	if logs != "fake logs" {
-		t.Fatalf("logs = %q, atteso output del fake REST client", logs)
+		t.Fatalf("logs = %q, expected output from fake REST client", logs)
 	}
 	actions := client.Actions()
 	if len(actions) != 1 || actions[0].GetVerb() != "get" || actions[0].GetSubresource() != "log" {
-		t.Fatalf("azione client inattesa: %+v", actions)
+		t.Fatalf("unexpected client action: %+v", actions)
 	}
 }

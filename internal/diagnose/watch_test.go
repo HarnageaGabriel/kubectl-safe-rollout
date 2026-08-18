@@ -33,16 +33,16 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/workload"
 )
 
-// withListResourceVersion aggiunge un reactor che assegna una
-// resourceVersion non vuota alla List di pod. E' un workaround del fake
-// clientset, non una necessita' di codice di produzione: contro un
-// apiserver reale una List porta sempre una resourceVersion valida
-// nel proprio ListMeta, ma l'ObjectTracker del fake clientset non la
-// imposta mai (vedi k8s.io/client-go/testing/fixture.go, tracker.List).
-// watchtools.NewRetryWatcherWithContext rifiuta esplicitamente una RV
-// vuota (o "0"): senza questo reactor Watch() non potrebbe mai avviare
-// lo stream contro un fake clientset, a prescindere da quanto sia
-// corretto il codice di produzione.
+// withListResourceVersion adds a reactor that assigns a non-empty
+// resourceVersion to the pod List. This works around the fake clientset,
+// not a production code requirement: against a real apiserver, a List
+// always carries a valid resourceVersion in its ListMeta, but the fake
+// clientset's ObjectTracker never sets it (see
+// k8s.io/client-go/testing/fixture.go, tracker.List).
+// watchtools.NewRetryWatcherWithContext explicitly rejects an empty RV
+// (or "0"): without this reactor, Watch() could never start the stream
+// against a fake clientset, regardless of whether the production code is
+// correct.
 func withListResourceVersion(client *fake.Clientset, rv string) {
 	client.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		obj, err := client.Tracker().List(action.GetResource(), corev1.SchemeGroupVersion.WithKind("Pod"), action.GetNamespace())
@@ -68,22 +68,21 @@ func watchDeployment() *appsv1.Deployment {
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "demo"}},
 			},
 		},
-		// ObservedGeneration=1 ma UpdatedReplicas=0: il rollout non e'
-		// ancora completo, altrimenti Watch() ritornerebbe con successo
-		// prima ancora di avviare lo stream sui pod, e il test non
-		// eserciterebbe il loop.
+		// ObservedGeneration=1 but UpdatedReplicas=0: the rollout is not
+		// complete yet; otherwise Watch() would return successfully before
+		// even starting the pod stream, and the test would not exercise the
+		// loop.
 		Status: appsv1.DeploymentStatus{ObservedGeneration: 1},
 	}
 }
 
 func watchHealthyPod() *corev1.Pod {
 	return &corev1.Pod{
-		// ResourceVersion e' impostato esplicitamente perche' il fake
-		// clientset non ne assegna mai una da solo (ne' qui ne' su
-		// Update, a differenza di un apiserver reale): senza un valore
-		// non vuoto sugli oggetti restituiti dal watch,
-		// watchtools.RetryWatcher li considera un errore fatale e
-		// interrompe lo stream (vedi retrywatcher.go, resourceVersionGetter).
+		// ResourceVersion is set explicitly because the fake clientset never
+		// assigns one itself (neither here nor on Update, unlike a real
+		// apiserver): without a non-empty value on objects returned by the
+		// watch, watchtools.RetryWatcher treats them as a fatal error and
+		// stops the stream (see retrywatcher.go, resourceVersionGetter).
 		ObjectMeta: metav1.ObjectMeta{Name: "app-1", Namespace: testNamespace, Labels: map[string]string{"app": "demo"}, ResourceVersion: "1"},
 		Status: corev1.PodStatus{
 			Phase: corev1.PodRunning,
@@ -100,11 +99,11 @@ func updatePodToCrashLoop(t *testing.T, client kubernetes.Interface) {
 	ctx := context.Background()
 	p, err := client.CoreV1().Pods(testNamespace).Get(ctx, "app-1", metav1.GetOptions{})
 	if err != nil {
-		t.Fatalf("lettura pod di fixture: %v", err)
+		t.Fatalf("reading fixture pod: %v", err)
 	}
-	// Il fake clientset non incrementa la resourceVersion da solo
-	// sull'Update: va avanzata a mano per lo stesso motivo per cui e'
-	// impostata su watchHealthyPod.
+	// The fake clientset does not increment resourceVersion itself on
+	// Update: advance it manually for the same reason it is set in
+	// watchHealthyPod.
 	p.ResourceVersion = "2"
 	p.Status.ContainerStatuses = []corev1.ContainerStatus{{
 		Name:  "app",
@@ -114,20 +113,19 @@ func updatePodToCrashLoop(t *testing.T, client kubernetes.Interface) {
 		}},
 	}}
 	if _, err := client.CoreV1().Pods(testNamespace).UpdateStatus(ctx, p, metav1.UpdateOptions{}); err != nil {
-		t.Fatalf("aggiornamento pod a CrashLoopBackOff: %v", err)
+		t.Fatalf("updating pod to CrashLoopBackOff: %v", err)
 	}
 }
 
-// TestWatch_CrashLoopFermaLOsservazione verifica il loop end-to-end: un
-// pod che entra in CrashLoopBackOff dopo l'avvio di Watch() deve
-// produrre un Outcome non riuscito con la causa classificata, tramite
-// lo stream di watch reale del fake clientset (Create/Update emettono
-// eventi ai watcher registrati, come su un apiserver vero). L'update
-// e' ripetuto a intervalli finche' il loop non lo osserva, invece di
-// indovinare un singolo istante in cui il watch e' gia' stabilito:
-// altrimenti il test sarebbe intermittente per la corsa tra
-// registrazione del watch e primo aggiornamento.
-func TestWatch_CrashLoopFermaLOsservazione(t *testing.T) {
+// TestWatch_CrashLoopStopsObservation verifies the loop end-to-end: a pod
+// entering CrashLoopBackOff after Watch() starts must produce an
+// unsuccessful Outcome with a classified cause through the fake
+// clientset's real watch stream (Create/Update emit events to registered
+// watchers, as on a real apiserver). The update repeats at intervals until
+// the loop observes it instead of guessing one instant when the watch is
+// already established; otherwise the test would be flaky due to the race
+// between watch registration and the first update.
+func TestWatch_CrashLoopStopsObservation(t *testing.T) {
 	client := fake.NewSimpleClientset(watchDeployment(), watchHealthyPod())
 	withListResourceVersion(client, "1")
 	wt := diagnose.WatchTarget{
@@ -155,28 +153,28 @@ func TestWatch_CrashLoopFermaLOsservazione(t *testing.T) {
 		select {
 		case r := <-done:
 			if r.err != nil {
-				t.Fatalf("Watch ha restituito un errore inatteso: %v", r.err)
+				t.Fatalf("Watch returned an unexpected error: %v", r.err)
 			}
 			if r.outcome.Succeeded {
-				t.Fatal("Watch ha riportato successo, atteso un fallimento diagnosticato")
+				t.Fatal("Watch reported success; expected a diagnosed failure")
 			}
 			if !diagnose.AnyFindings(r.outcome.Results) {
-				t.Fatalf("atteso almeno un finding nei Results, got %+v", r.outcome.Results)
+				t.Fatalf("expected at least one finding in Results, got %+v", r.outcome.Results)
 			}
 			return
 		case <-ctx.Done():
-			t.Fatal("Watch non ha rilevato il CrashLoopBackOff entro il timeout")
+			t.Fatal("Watch did not detect CrashLoopBackOff before the timeout")
 		case <-ticker.C:
 			updatePodToCrashLoop(t, client)
 		}
 	}
 }
 
-// TestWatch_RolloutGiaCompleto verifica che Watch() ritorni successo se
-// il rollout e' gia' concluso e resta stabile per l'intera finestra di
-// stabilita' (vedi rolloutStabilityWindow): una lettura "completo" e'
-// necessaria ma non piu' sufficiente da sola, deve anche persistere.
-func TestWatch_RolloutGiaCompleto(t *testing.T) {
+// TestWatch_RolloutAlreadyComplete verifies that Watch() returns success if
+// the rollout is already complete and remains stable for the entire
+// stability window (see rolloutStabilityWindow): one "complete" read is
+// necessary but no longer sufficient on its own; it must also persist.
+func TestWatch_RolloutAlreadyComplete(t *testing.T) {
 	d := watchDeployment()
 	d.Status = appsv1.DeploymentStatus{
 		ObservedGeneration: 1,
@@ -198,20 +196,20 @@ func TestWatch_RolloutGiaCompleto(t *testing.T) {
 
 	outcome, err := diagnose.Watch(ctx, wt)
 	if err != nil {
-		t.Fatalf("Watch ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Watch returned an unexpected error: %v", err)
 	}
 	if !outcome.Succeeded {
-		t.Fatalf("atteso Succeeded=true per un rollout gia' completo, got %+v", outcome)
+		t.Fatalf("expected Succeeded=true for an already complete rollout, got %+v", outcome)
 	}
 }
 
-// TestWatch_CompletoTransitorio_NonBastaDaSolo verifica il bug reale
-// scoperto sugli scenari e2e (test/e2e): un pod senza readinessProbe
-// conta come Ready (quindi Available) nell'istante in cui il kubelet lo
-// porta Running, anche se crasha un momento dopo. Se RolloutComplete()
-// bastasse da sola, Watch() dichiarerebbe successo su un rollout che sta
-// per andare in CrashLoopBackOff.
-func TestWatch_CompletoTransitorio_NonBastaDaSolo(t *testing.T) {
+// TestWatch_TransientlyComplete_IsNotEnoughOnItsOwn verifies the real bug
+// found in e2e scenarios (test/e2e): a pod without a readinessProbe counts
+// as Ready (and therefore Available) when the kubelet moves it to Running,
+// even if it crashes moments later. If RolloutComplete() were sufficient
+// on its own, Watch() would declare success for a rollout about to enter
+// CrashLoopBackOff.
+func TestWatch_TransientlyComplete_IsNotEnoughOnItsOwn(t *testing.T) {
 	d := watchDeployment()
 	d.Status = appsv1.DeploymentStatus{
 		ObservedGeneration: 1,
@@ -241,37 +239,36 @@ func TestWatch_CompletoTransitorio_NonBastaDaSolo(t *testing.T) {
 		done <- result{outcome, err}
 	}()
 
-	// Il crash arriva ben prima che scada la finestra di stabilita' (che
-	// qui e' 500ms): se il bug tornasse, Watch() avrebbe gia' dichiarato
-	// successo nel frattempo.
+	// The crash arrives well before the stability window expires (500ms
+	// here): if the bug returned, Watch() would already have declared
+	// success in the meantime.
 	time.Sleep(50 * time.Millisecond)
 	updatePodToCrashLoop(t, client)
 
 	select {
 	case r := <-done:
 		if r.err != nil {
-			t.Fatalf("Watch ha restituito un errore inatteso: %v", r.err)
+			t.Fatalf("Watch returned an unexpected error: %v", r.err)
 		}
 		if r.outcome.Succeeded {
-			t.Fatal("Watch ha riportato successo: la finestra di stabilita' non ha catturato il crash successivo alla lettura Complete")
+			t.Fatal("Watch reported success: the stability window did not catch the crash after the Complete read")
 		}
 		if !diagnose.AnyFindings(r.outcome.Results) {
-			t.Fatalf("atteso almeno un finding nei Results, got %+v", r.outcome.Results)
+			t.Fatalf("expected at least one finding in Results, got %+v", r.outcome.Results)
 		}
 	case <-ctx.Done():
-		t.Fatal("Watch non ha concluso entro il timeout")
+		t.Fatal("Watch did not finish before the timeout")
 	}
 }
 
-// TestWatch_UndeterminedSiAffinaEntroLaFinestraDiGrazia verifica il bug
-// reale scoperto sullo scenario e2e ImagePullBackOff: il kubelet posta
-// Waiting=ErrImagePull sul Pod prima ancora che l'Event Reason=Failed
-// col messaggio dettagliato sia visibile via List. Se Watch finalizzasse
-// "-undetermined" sul primo tick, perderebbe una causa specifica che
-// arriva un istante dopo. La finestra di grazia deve dare tempo
-// all'evidenza di arrivare, non solo attendere e riportare comunque
-// "non determinato".
-func TestWatch_UndeterminedSiAffinaEntroLaFinestraDiGrazia(t *testing.T) {
+// TestWatch_UndeterminedRefinesWithinGraceWindow verifies the real bug
+// found in the ImagePullBackOff e2e scenario: the kubelet sets
+// Waiting=ErrImagePull on the Pod before the Event with Reason=Failed and
+// its detailed message become visible via List. If Watch finalized
+// "-undetermined" on the first tick, it would miss a specific cause that
+// arrives moments later. The grace window must give evidence time to
+// arrive, not merely wait and still report "undetermined".
+func TestWatch_UndeterminedRefinesWithinGraceWindow(t *testing.T) {
 	p := watchHealthyPod()
 	p.UID = "app-1-uid"
 	p.Status.ContainerStatuses = []corev1.ContainerStatus{{
@@ -302,9 +299,9 @@ func TestWatch_UndeterminedSiAffinaEntroLaFinestraDiGrazia(t *testing.T) {
 		done <- result{outcome, err}
 	}()
 
-	// Attesa breve, ben dentro la finestra di grazia di 2s: crea
-	// l'evento che affina la causa e tocca il pod (stessa condizione,
-	// solo per far scattare una nuova rivalutazione via lo stream).
+	// Short wait, well within the 2s grace window: create the event that
+	// refines the cause and touch the pod (same condition, only to trigger
+	// another evaluation through the stream).
 	time.Sleep(200 * time.Millisecond)
 	ctxBg := context.Background()
 	_, err := client.CoreV1().Events(testNamespace).Create(ctxBg, &corev1.Event{
@@ -314,35 +311,35 @@ func TestWatch_UndeterminedSiAffinaEntroLaFinestraDiGrazia(t *testing.T) {
 		Message:        `Failed to pull image "example.com/app:v1": rpc error: manifest unknown`,
 	}, metav1.CreateOptions{})
 	if err != nil {
-		t.Fatalf("creazione evento Failed: %v", err)
+		t.Fatalf("creating Failed event: %v", err)
 	}
 	fresh, err := client.CoreV1().Pods(testNamespace).Get(ctxBg, "app-1", metav1.GetOptions{})
 	if err != nil {
-		t.Fatalf("lettura pod di fixture: %v", err)
+		t.Fatalf("reading fixture pod: %v", err)
 	}
 	fresh.ResourceVersion = "2"
 	if _, err := client.CoreV1().Pods(testNamespace).UpdateStatus(ctxBg, fresh, metav1.UpdateOptions{}); err != nil {
-		t.Fatalf("aggiornamento pod per forzare una nuova rivalutazione: %v", err)
+		t.Fatalf("updating pod to force another evaluation: %v", err)
 	}
 
 	select {
 	case r := <-done:
 		if r.err != nil {
-			t.Fatalf("Watch ha restituito un errore inatteso: %v", r.err)
+			t.Fatalf("Watch returned an unexpected error: %v", r.err)
 		}
 		findings := diagnose.AllFindings(r.outcome.Results)
 		if len(findings) != 1 {
-			t.Fatalf("atteso 1 finding, got %+v", findings)
+			t.Fatalf("expected 1 finding, got %+v", findings)
 		}
 		if findings[0].Undetermined || findings[0].CheckID != string(diagnose.CauseImagePullTagNotFound) {
-			t.Fatalf("la causa doveva affinarsi entro la finestra di grazia, got %+v", findings[0])
+			t.Fatalf("the cause should have been refined within the grace window, got %+v", findings[0])
 		}
 	case <-ctx.Done():
-		t.Fatal("Watch non ha concluso entro il timeout")
+		t.Fatal("Watch did not finish before the timeout")
 	}
 }
 
-func TestWatch_ProgressDeadlineOsservatoSulDeployment(t *testing.T) {
+func TestWatch_ProgressDeadlineObservedOnDeployment(t *testing.T) {
 	d := watchDeployment()
 	client := fake.NewSimpleClientset(d, watchHealthyPod())
 	withListResourceVersion(client, "1")
@@ -370,19 +367,19 @@ func TestWatch_ProgressDeadlineOsservatoSulDeployment(t *testing.T) {
 		select {
 		case r := <-done:
 			if r.err != nil {
-				t.Fatalf("Watch ha restituito un errore inatteso: %v", r.err)
+				t.Fatalf("Watch returned an unexpected error: %v", r.err)
 			}
 			findings := diagnose.AllFindings(r.outcome.Results)
 			if len(findings) != 1 || findings[0].CheckID != string(diagnose.CauseProgressDeadlineExceeded) {
-				t.Fatalf("atteso progress-deadline-exceeded, got %+v", findings)
+				t.Fatalf("expected progress-deadline-exceeded, got %+v", findings)
 			}
 			return
 		case <-ctx.Done():
-			t.Fatal("Watch non ha osservato progressDeadlineExceeded sul Deployment")
+			t.Fatal("Watch did not observe progressDeadlineExceeded on the Deployment")
 		case <-ticker.C:
 			current, err := client.AppsV1().Deployments(testNamespace).Get(ctx, "app", metav1.GetOptions{})
 			if err != nil {
-				t.Fatalf("lettura Deployment fixture: %v", err)
+				t.Fatalf("reading fixture Deployment: %v", err)
 			}
 			current.ResourceVersion = "2"
 			current.Status.Conditions = []appsv1.DeploymentCondition{{
@@ -391,13 +388,13 @@ func TestWatch_ProgressDeadlineOsservatoSulDeployment(t *testing.T) {
 				Reason: "ProgressDeadlineExceeded",
 			}}
 			if _, err := client.AppsV1().Deployments(testNamespace).UpdateStatus(ctx, current, metav1.UpdateOptions{}); err != nil {
-				t.Fatalf("aggiornamento Deployment fixture: %v", err)
+				t.Fatalf("updating fixture Deployment: %v", err)
 			}
 		}
 	}
 }
 
-func TestWatch_EventNonAccessibili_DegradaSenzaPerdereSegnaliStrutturati(t *testing.T) {
+func TestWatch_EventsInaccessible_DegradesWithoutLosingStructuredSignals(t *testing.T) {
 	p := watchHealthyPod()
 	p.Status.ContainerStatuses = []corev1.ContainerStatus{{
 		Name:  "app",
@@ -418,11 +415,11 @@ func TestWatch_EventNonAccessibili_DegradaSenzaPerdereSegnaliStrutturati(t *test
 		Client:    client,
 	})
 	if err != nil {
-		t.Fatalf("Events non accessibili devono degradare, non fallire watch: %v", err)
+		t.Fatalf("inaccessible Events must degrade, not fail the watch: %v", err)
 	}
 	findings := diagnose.AllFindings(outcome.Results)
 	if len(findings) != 1 || findings[0].CheckID != string(diagnose.CauseCrashLoopOOMKilled) {
-		t.Fatalf("segnale strutturato OOMKilled perso: %+v", findings)
+		t.Fatalf("lost structured OOMKilled signal: %+v", findings)
 	}
 	foundSkip := false
 	for _, result := range outcome.Results {
@@ -431,6 +428,6 @@ func TestWatch_EventNonAccessibili_DegradaSenzaPerdereSegnaliStrutturati(t *test
 		}
 	}
 	if !foundSkip {
-		t.Fatalf("mancato Result.Skipped per Event non accessibili: %+v", outcome.Results)
+		t.Fatalf("missing Result.Skipped for inaccessible Events: %+v", outcome.Results)
 	}
 }

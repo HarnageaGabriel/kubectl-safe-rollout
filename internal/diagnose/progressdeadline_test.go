@@ -35,7 +35,7 @@ func deploymentWithConditions(conditions ...appsv1.DeploymentCondition) *appsv1.
 	}
 }
 
-func TestProgressDeadline_Superato(t *testing.T) {
+func TestProgressDeadline_Exceeded(t *testing.T) {
 	d := deploymentWithConditions(appsv1.DeploymentCondition{
 		Type:    appsv1.DeploymentProgressing,
 		Reason:  "ProgressDeadlineExceeded",
@@ -46,17 +46,17 @@ func TestProgressDeadline_Superato(t *testing.T) {
 
 	res, err := diagnose.ProgressDeadline{}.Diagnose(t.Context(), target)
 	if err != nil {
-		t.Fatalf("Diagnose ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
 	}
 	if len(res.Findings) != 1 || res.Findings[0].CheckID != string(diagnose.CauseProgressDeadlineExceeded) {
-		t.Fatalf("atteso 1 finding %q, got %+v", diagnose.CauseProgressDeadlineExceeded, res.Findings)
+		t.Fatalf("expected 1 finding %q, got %+v", diagnose.CauseProgressDeadlineExceeded, res.Findings)
 	}
 	if res.Findings[0].Undetermined {
-		t.Error("la condition ProgressDeadlineExceeded e' gia' la causa: non deve essere Undetermined")
+		t.Error("the ProgressDeadlineExceeded condition is already the cause: it must not be Undetermined")
 	}
 }
 
-func TestProgressDeadline_NonSuperato(t *testing.T) {
+func TestProgressDeadline_NotExceeded(t *testing.T) {
 	d := deploymentWithConditions(appsv1.DeploymentCondition{
 		Type:   appsv1.DeploymentProgressing,
 		Reason: "ReplicaSetUpdated",
@@ -66,9 +66,9 @@ func TestProgressDeadline_NonSuperato(t *testing.T) {
 
 	res, err := diagnose.ProgressDeadline{}.Diagnose(t.Context(), target)
 	if err != nil {
-		t.Fatalf("Diagnose ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
 	}
 	if len(res.Findings) != 0 {
-		t.Fatalf("un rollout ancora in corso non deve produrre finding, got %+v", res.Findings)
+		t.Fatalf("a rollout still in progress must not produce findings, got %+v", res.Findings)
 	}
 }

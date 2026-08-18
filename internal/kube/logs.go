@@ -23,15 +23,16 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// PreviousLogTailer recupera una coda limitata dei log del container
-// precedente. Implementa diagnose.LogTailer senza creare una dipendenza
-// inversa da kube verso diagnose.
+// PreviousLogTailer retrieves a limited tail of the previous container's
+// logs. It implements diagnose.LogTailer without creating a reverse
+// dependency from kube to diagnose.
 type PreviousLogTailer struct {
 	Client kubernetes.Interface
 }
 
-// PreviousLogTail recupera al massimo lines righe e limita anche i byte
-// letti, per evitare che un runtime non conforme produca output illimitato.
+// PreviousLogTail retrieves no more than the requested number of lines and
+// also limits the bytes read, to prevent a non-compliant runtime from
+// producing unlimited output.
 func (t PreviousLogTailer) PreviousLogTail(ctx context.Context, namespace, pod, container string, lines int64) (string, error) {
 	req := t.Client.CoreV1().Pods(namespace).GetLogs(pod, &corev1.PodLogOptions{
 		Container: container,
@@ -40,7 +41,7 @@ func (t PreviousLogTailer) PreviousLogTail(ctx context.Context, namespace, pod, 
 	})
 	stream, err := req.Stream(ctx)
 	if err != nil {
-		return "", fmt.Errorf("apertura log precedenti di Pod/%s container %s: %w", pod, container, err)
+		return "", fmt.Errorf("opening previous logs for Pod/%s container %s: %w", pod, container, err)
 	}
 	defer func() {
 		_ = stream.Close()
@@ -49,7 +50,7 @@ func (t PreviousLogTailer) PreviousLogTail(ctx context.Context, namespace, pod, 
 	const maxLogBytes = 16 * 1024
 	b, err := io.ReadAll(io.LimitReader(stream, maxLogBytes))
 	if err != nil {
-		return "", fmt.Errorf("lettura log precedenti di Pod/%s container %s: %w", pod, container, err)
+		return "", fmt.Errorf("reading previous logs for Pod/%s container %s: %w", pod, container, err)
 	}
 	return string(b), nil
 }

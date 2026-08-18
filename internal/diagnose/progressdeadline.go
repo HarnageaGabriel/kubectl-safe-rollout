@@ -21,23 +21,22 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/model"
 )
 
-// ProgressDeadlineDiagnoserID e' l'identificativo stabile della
-// categoria, usato come Result.DiagnoserID.
+// ProgressDeadlineDiagnoserID is the stable category identifier, used as
+// Result.DiagnoserID.
 const ProgressDeadlineDiagnoserID = "progress-deadline"
 
-// ProgressDeadline riporta quando il controller del workload ha gia'
-// concluso, per conto proprio, che il rollout non progredisce entro il
-// proprio deadline. A differenza degli altri Diagnoser non c'e' un
-// pattern da riconoscere: la condition letta da
-// Workload.ProgressDeadlineExceeded() e' gia' la causa, non un sintomo
-// da interpretare, quindi non esiste una variante "-undetermined" per
-// questa categoria.
+// ProgressDeadline reports when the workload controller has already
+// concluded on its own that the rollout is not progressing within its
+// deadline. Unlike the other Diagnosers, there is no pattern to recognize:
+// the condition read by Workload.ProgressDeadlineExceeded() is already the
+// cause, not a symptom to interpret, so this category has no
+// "-undetermined" variant.
 type ProgressDeadline struct{}
 
-// ID implementa Diagnoser.
+// ID implements Diagnoser.
 func (ProgressDeadline) ID() string { return ProgressDeadlineDiagnoserID }
 
-// Diagnose implementa Diagnoser.
+// Diagnose implements Diagnoser.
 func (ProgressDeadline) Diagnose(_ context.Context, target Target) (Result, error) {
 	message, exceeded := target.Workload.ProgressDeadlineExceeded()
 	if !exceeded {
@@ -53,17 +52,17 @@ func (ProgressDeadline) Diagnose(_ context.Context, target Target) (Result, erro
 		CheckID:  string(CauseProgressDeadlineExceeded),
 		Severity: model.SeverityHigh,
 		Cause: fmt.Sprintf(
-			"%s ha superato il proprio progressDeadlineSeconds: il controller ha concluso che il rollout non sta progredendo",
+			"%s exceeded its progressDeadlineSeconds: the controller concluded that the rollout is not progressing",
 			resource,
 		),
 		Evidence: []string{fmt.Sprintf("condition Progressing/ProgressDeadlineExceeded: %s", message)},
 		Remediation: model.Remediation{
-			// Nessun Commands: un rollback (`kubectl rollout undo`) e'
-			// un'azione con conseguenze reali, non un comando di sola
-			// lettura come negli altri Diagnoser. Suggerirlo come
-			// comando pronto normalizzerebbe un'azione che deve restare
-			// una decisione esplicita di chi opera, non un copia-incolla.
-			Summary:          "esamina i pod del rollout (probabilmente in CrashLoopBackOff, ImagePullBackOff o Pending: gli altri Diagnoser di questo comando li classificano separatamente) o valuta un rollback con `kubectl rollout undo` se il rilascio precedente era stabile",
+			// No Commands: a rollback (`kubectl rollout undo`) is an action
+			// with real consequences, not a read-only command like those in
+			// the other Diagnosers. Suggesting it as a ready-made command
+			// would normalize an action that must remain an explicit operator
+			// decision, not a copy-paste operation.
+			Summary:          "inspect the rollout pods (likely in CrashLoopBackOff, ImagePullBackOff, or Pending: the other Diagnosers in this command classify them separately) or consider a rollback with `kubectl rollout undo` if the previous release was stable",
 			ContextDependent: true,
 		},
 		Resource: resource,
