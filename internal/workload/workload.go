@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package workload astrae le differenze tra i tipi di workload
-// Kubernetes (Deployment, e in futuro StatefulSet) dietro un'unica
-// interfaccia. Le verifiche in internal/check ragionano su Workload, non
-// sui tipi concreti di k8s.io/api/apps/v1: questo evita che ogni nuova
-// verifica debba gestire uno switch su Deployment/StatefulSet/DaemonSet.
+// Package workload abstracts differences among Kubernetes workload types
+// (Deployment, and StatefulSet in the future) behind a single interface.
+// Checks in internal/check operate on Workload, not concrete types from
+// k8s.io/api/apps/v1: this prevents every new check from having to handle
+// a switch on Deployment/StatefulSet/DaemonSet.
 package workload
 
 import (
@@ -28,20 +28,19 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
-// UpdateStrategy normalizza le strategie di aggiornamento dei diversi
-// controller (RollingUpdate/Recreate per Deployment, RollingUpdate/
-// OnDelete per StatefulSet) in una forma comune. MaxUnavailable e
-// MaxSurge sono nil quando il controller non li supporta (es. Recreate),
-// non quando valgono zero: la distinzione conta per le verifiche.
+// UpdateStrategy normalizes the update strategies of different controllers
+// (RollingUpdate/Recreate for Deployment, RollingUpdate/OnDelete for
+// StatefulSet) into a common form. MaxUnavailable and MaxSurge are nil when
+// the controller does not support them (e.g. Recreate), not when they are
+// zero: the distinction matters to checks.
 type UpdateStrategy struct {
 	Type           string
 	MaxUnavailable *intstr.IntOrString
 	MaxSurge       *intstr.IntOrString
 }
 
-// Recreate e RollingUpdate replicano le costanti di appsv1 per non
-// forzare i chiamanti a importare k8s.io/api/apps/v1 solo per
-// confrontare il tipo di strategia.
+// Recreate and RollingUpdate replicate the appsv1 constants to avoid forcing
+// callers to import k8s.io/api/apps/v1 only to compare the strategy type.
 const (
 	Recreate        = "Recreate"
 	RollingUpdate   = "RollingUpdate"
@@ -49,60 +48,59 @@ const (
 	defaultMaxSurge = "25%"
 )
 
-// Workload e' la vista che le verifiche pre-flight e la diagnosi di
-// watch hanno di un Deployment/StatefulSet/... live.
+// Workload is the view of a live Deployment/StatefulSet/... exposed to
+// pre-flight checks and watch diagnosis.
 type Workload interface {
 	Kind() string
 	Name() string
 	Namespace() string
-	// UID identifica l'oggetto live: serve a internal/diagnose per
-	// filtrare i ReplicaSet posseduti dal workload (OwnerReferences),
-	// non alle verifiche di internal/check, che non ne hanno bisogno.
+	// UID identifies the live object: internal/diagnose uses it to filter
+	// ReplicaSets owned by the workload (OwnerReferences); checks in
+	// internal/check do not need it.
 	UID() types.UID
-	// Replicas e' il numero di repliche desiderate, mai nil: un
-	// Deployment con Spec.Replicas non impostato vale 1 per default di
-	// Kubernetes, e questa funzione applica quel default cosi' i
-	// chiamanti non devono ricordarselo.
+	// Replicas is the desired replica count, never nil: a Deployment with
+	// Spec.Replicas unset defaults to 1 in Kubernetes, and this method applies
+	// that default so callers do not have to remember it.
 	Replicas() int32
-	// PodLabels sono le label del pod template, usate per il matching
-	// contro il selector di un PodDisruptionBudget e per l'osservazione
-	// dei pod in `watch`.
+	// PodLabels are the pod template labels, used to match against a
+	// PodDisruptionBudget selector and to observe pods in `watch`.
 	PodLabels() map[string]string
-	// PodSelector e' il selector immutabile del controller, non tutte le
-	// label del template corrente. Serve a includere anche pod e ReplicaSet
-	// di revisioni precedenti durante un rollout.
+	// PodSelector is the controller's immutable selector, not all labels from
+	// the current template. It also includes pods and ReplicaSets from previous
+	// revisions during a rollout.
 	PodSelector() (labels.Selector, error)
 	UpdateStrategy() UpdateStrategy
-	// PodRequests somma le request (non i limits) di tutti i container
-	// regolari del pod template, per confrontarle con l'headroom di una
-	// ResourceQuota durante il surge. Somma solo i container regolari:
-	// gli init container hanno una semantica di request effettiva
-	// diversa (il massimo tra loro e la somma dei regolari, non un
-	// ulteriore addendo), un dettaglio che la sola verifica di quota-
-	// headroom non ha bisogno di modellare per un margine ragionevole.
+	// PodRequests sums requests (not limits) for all regular containers in the
+	// pod template, to compare them with ResourceQuota headroom during a surge.
+	// It sums only regular containers: init containers have different effective
+	// request semantics (the maximum of the largest init-container request and
+	// the sum of regular-container requests, not an additional addend), a detail
+	// the quota-headroom check alone does not need to model to preserve a
+	// reasonable margin.
 	PodRequests() corev1.ResourceList
-	// PodContainers espone i ContainerSpec regolari completi per i check
-	// che devono leggere Probe e Resources per-container: un DTO dedicato
-	// aggiungerebbe indirezione senza nascondere dettagli Kubernetes.
+	// PodContainers exposes complete regular ContainerSpecs for checks that
+	// must read per-container Probe and Resources: a dedicated DTO would add
+	// indirection without hiding Kubernetes details.
 	PodContainers() []corev1.Container
-	// ImagePullSecretNames espone i nomi dei secret dichiarati direttamente
-	// nel pod template. I secret ereditati dal ServiceAccount richiedono una
-	// lettura cluster e restano responsabilita' del check che ne ha bisogno.
+	// ImagePullSecretNames exposes the names of secrets declared directly in
+	// the pod template. Secrets inherited from the ServiceAccount require a
+	// cluster read and remain the responsibility of the check that needs them.
 	ImagePullSecretNames() []string
-	// ServiceAccountName espone il nome dichiarato nel pod template. Una
-	// stringa vuota indica il ServiceAccount Kubernetes "default": il getter
-	// non applica il default per lasciare questa decisione visibile al chiamante.
+	// ServiceAccountName exposes the name declared in the pod template. An
+	// empty string indicates the Kubernetes "default" ServiceAccount: the
+	// getter does not apply the default, keeping that decision visible to the
+	// caller.
 	ServiceAccountName() string
-	// RolloutComplete riporta se il rollout e' concluso con successo:
-	// repliche aggiornate, disponibili, e la generazione corrente della
-	// Spec osservata dal controller. Usato da `watch` per fermare
-	// l'osservazione sul percorso positivo.
+	// RolloutComplete reports whether the rollout completed successfully:
+	// replicas are updated and available, and the controller observed the
+	// current Spec generation. Used by `watch` to stop observation on the
+	// successful path.
 	RolloutComplete() bool
-	// ProgressDeadlineExceeded riporta se il controller ha gia'
-	// concluso, per conto proprio, che il rollout non progredisce entro
-	// il proprio deadline. ok=false significa "non applicabile a questo
-	// tipo di controller o non ancora superato", mai "sicuramente non
-	// superato": i chiamanti non devono confondere le due cose.
+	// ProgressDeadlineExceeded reports whether the controller has already
+	// concluded on its own that the rollout is not progressing within its
+	// deadline. ok=false means "not applicable to this controller type or not
+	// yet exceeded", never "definitely not exceeded": callers must not confuse
+	// the two.
 	ProgressDeadlineExceeded() (message string, ok bool)
 }
 
@@ -110,7 +108,7 @@ type deploymentWorkload struct {
 	d *appsv1.Deployment
 }
 
-// FromDeployment costruisce un Workload a partire da un Deployment live.
+// FromDeployment builds a Workload from a live Deployment.
 func FromDeployment(d *appsv1.Deployment) Workload {
 	return &deploymentWorkload{d: d}
 }
@@ -162,7 +160,7 @@ func (w *deploymentWorkload) UpdateStrategy() UpdateStrategy {
 	}
 }
 
-// PodRequests implementa Workload.
+// PodRequests implements Workload.
 func (w *deploymentWorkload) PodRequests() corev1.ResourceList {
 	total := corev1.ResourceList{}
 	for _, c := range w.d.Spec.Template.Spec.Containers {
@@ -175,12 +173,12 @@ func (w *deploymentWorkload) PodRequests() corev1.ResourceList {
 	return total
 }
 
-// PodContainers implementa Workload.
+// PodContainers implements Workload.
 func (w *deploymentWorkload) PodContainers() []corev1.Container {
 	return w.d.Spec.Template.Spec.Containers
 }
 
-// ImagePullSecretNames implementa Workload.
+// ImagePullSecretNames implements Workload.
 func (w *deploymentWorkload) ImagePullSecretNames() []string {
 	refs := w.d.Spec.Template.Spec.ImagePullSecrets
 	names := make([]string, 0, len(refs))
@@ -190,20 +188,18 @@ func (w *deploymentWorkload) ImagePullSecretNames() []string {
 	return names
 }
 
-// ServiceAccountName implementa Workload.
+// ServiceAccountName implements Workload.
 func (w *deploymentWorkload) ServiceAccountName() string {
 	return w.d.Spec.Template.Spec.ServiceAccountName
 }
 
-// RolloutComplete replica la logica di `kubectl rollout status` per
-// Deployment (pkg/polymorphichelpers/rollout_status.go): la Spec
-// corrente deve essere stata osservata dal controller, le repliche
-// aggiornate devono aver raggiunto il numero desiderato, non devono
-// restare repliche vecchie in attesa di terminazione, e le repliche
-// aggiornate devono essere tutte disponibili. Replicare lo stesso
-// calcolo di un tool che l'ecosistema gia' considera corretto evita di
-// reinventare una definizione di "successo" leggermente diversa e
-// difficile da giustificare.
+// RolloutComplete replicates the `kubectl rollout status` logic for
+// Deployment (pkg/polymorphichelpers/rollout_status.go): the current Spec
+// must have been observed by the controller, updated replicas must have
+// reached the desired count, no old replicas may remain pending termination,
+// and all updated replicas must be available. Replicating the same calculation
+// as a tool the ecosystem already considers correct avoids reinventing a
+// slightly different definition of "success" that is difficult to justify.
 func (w *deploymentWorkload) RolloutComplete() bool {
 	d := w.d
 	if d.Generation > d.Status.ObservedGeneration {
@@ -222,18 +218,17 @@ func (w *deploymentWorkload) RolloutComplete() bool {
 	return true
 }
 
-// progressDeadlineExceededReason e' il valore di Reason che il
-// controller del Deployment scrive sulla condition "Progressing"
-// quando supera spec.progressDeadlineSeconds (deploymentutil.
-// TimedOutReason in k8s.io/kubernetes, non importabile qui: e' un
-// letterale stabile, parte del contratto osservabile del controller,
-// non un messaggio di log soggetto a riformulazione).
+// progressDeadlineExceededReason is the Reason value written by the
+// Deployment controller to the "Progressing" condition when it exceeds
+// spec.progressDeadlineSeconds (deploymentutil.TimedOutReason in
+// k8s.io/kubernetes, which cannot be imported here: it is a stable literal,
+// part of the controller's observable contract, not a log message subject to
+// rewording).
 const progressDeadlineExceededReason = "ProgressDeadlineExceeded"
 
-// ProgressDeadlineExceeded legge la condition "Progressing" dallo
-// Status del Deployment: e' il controller stesso ad aver gia' concluso
-// che il rollout e' bloccato, non e' una deduzione di questo progetto
-// da un timeout proprio.
+// ProgressDeadlineExceeded reads the "Progressing" condition from the
+// Deployment Status: the controller itself has already concluded that the
+// rollout is stuck; this project does not infer it from its own timeout.
 func (w *deploymentWorkload) ProgressDeadlineExceeded() (message string, ok bool) {
 	for _, c := range w.d.Status.Conditions {
 		if c.Type == appsv1.DeploymentProgressing && c.Reason == progressDeadlineExceededReason {

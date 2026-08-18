@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Fixture condivise per i test di internal/diagnose: uno stato osservato
-// realistico (Pod, ContainerStatus, Event) e' quello che rende questi
-// test una prova credibile della classificazione, non solo del fatto che
-// il codice compili.
+// Shared fixtures for internal/diagnose tests: realistic observed state
+// (Pod, ContainerStatus, Event) makes these tests credible evidence of
+// classification, not merely evidence that the code compiles.
 package diagnose_test
 
 import (
@@ -55,9 +54,9 @@ func event(uid types.UID, reason, message string) corev1.Event {
 	}
 }
 
-// newTarget costruisce un diagnose.Target di test. extraObjs alimenta il
-// fake clientset (usato dal Diagnoser Pending per leggere le
-// PersistentVolumeClaim referenziate dai pod).
+// newTarget builds a test diagnose.Target. extraObjs populates the fake
+// clientset (used by the Pending Diagnoser to read the
+// PersistentVolumeClaims referenced by the pods).
 func newTarget(t *testing.T, pods []corev1.Pod, events []corev1.Event, replicaSets []appsv1.ReplicaSet, extraObjs ...runtime.Object) diagnose.Target {
 	t.Helper()
 	client := fake.NewSimpleClientset(extraObjs...)
@@ -70,7 +69,7 @@ func newTarget(t *testing.T, pods []corev1.Pod, events []corev1.Event, replicaSe
 	}
 }
 
-func TestGroupEventsByInvolvedObject_RaggruppaPerUID(t *testing.T) {
+func TestGroupEventsByInvolvedObject_GroupsByUID(t *testing.T) {
 	events := []corev1.Event{
 		event("pod-a", "Failed", "primo"),
 		event("pod-a", "Failed", "secondo"),
@@ -81,38 +80,38 @@ func TestGroupEventsByInvolvedObject_RaggruppaPerUID(t *testing.T) {
 	grouped := diagnose.GroupEventsByInvolvedObject(events)
 
 	if len(grouped["pod-a"]) != 2 {
-		t.Fatalf("attesi 2 eventi per pod-a, got %d", len(grouped["pod-a"]))
+		t.Fatalf("expected 2 events for pod-a, got %d", len(grouped["pod-a"]))
 	}
 	if len(grouped["pod-b"]) != 1 {
-		t.Fatalf("atteso 1 evento per pod-b, got %d", len(grouped["pod-b"]))
+		t.Fatalf("expected 1 event for pod-b, got %d", len(grouped["pod-b"]))
 	}
 	if _, ok := grouped[""]; ok {
-		t.Fatalf("un evento senza InvolvedObject.UID non deve comparire nella mappa")
+		t.Fatalf("an event without InvolvedObject.UID must not appear in the map")
 	}
 }
 
 func TestAnyFindings(t *testing.T) {
 	if diagnose.AnyFindings([]diagnose.Result{{DiagnoserID: "x"}}) {
-		t.Fatal("AnyFindings deve essere false se nessun Result ha Findings")
+		t.Fatal("AnyFindings must be false when no Result has Findings")
 	}
 	withFinding := []diagnose.Result{{DiagnoserID: "x", Findings: []model.Finding{{CheckID: "y"}}}}
 	if !diagnose.AnyFindings(withFinding) {
-		t.Fatal("AnyFindings deve essere true se almeno un Result ha Findings")
+		t.Fatal("AnyFindings must be true when at least one Result has Findings")
 	}
 }
 
-func TestAllFindings_Appiattisce(t *testing.T) {
+func TestAllFindings_Flattens(t *testing.T) {
 	results := []diagnose.Result{
 		{DiagnoserID: "a", Findings: []model.Finding{{CheckID: "a1"}, {CheckID: "a2"}}},
 		{DiagnoserID: "b", Findings: []model.Finding{{CheckID: "b1"}}},
 	}
 	got := diagnose.AllFindings(results)
 	if len(got) != 3 {
-		t.Fatalf("attesi 3 finding appiattiti, got %d", len(got))
+		t.Fatalf("expected 3 flattened findings, got %d", len(got))
 	}
 }
 
-func TestRunDiagnosis_NessunProblema(t *testing.T) {
+func TestRunDiagnosis_NoIssue(t *testing.T) {
 	pods := []corev1.Pod{podWith("app-1", "app-1-uid", corev1.PodRunning, corev1.ContainerStatus{
 		Name:  "app",
 		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
@@ -126,14 +125,14 @@ func TestRunDiagnosis_NessunProblema(t *testing.T) {
 
 	results, err := diagnose.RunDiagnosis(t.Context(), target)
 	if err != nil {
-		t.Fatalf("RunDiagnosis ha restituito un errore inatteso: %v", err)
+		t.Fatalf("RunDiagnosis returned an unexpected error: %v", err)
 	}
 	if diagnose.AnyFindings(results) {
-		t.Fatalf("nessun problema atteso, got %+v", diagnose.AllFindings(results))
+		t.Fatalf("expected no issues, got %+v", diagnose.AllFindings(results))
 	}
 }
 
-func TestRunDiagnosis_CrashLoopRilevato(t *testing.T) {
+func TestRunDiagnosis_CrashLoopDetected(t *testing.T) {
 	pods := []corev1.Pod{podWith("app-1", "app-1-uid", corev1.PodRunning, corev1.ContainerStatus{
 		Name: "app",
 		State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{
@@ -152,9 +151,9 @@ func TestRunDiagnosis_CrashLoopRilevato(t *testing.T) {
 
 	results, err := diagnose.RunDiagnosis(t.Context(), target)
 	if err != nil {
-		t.Fatalf("RunDiagnosis ha restituito un errore inatteso: %v", err)
+		t.Fatalf("RunDiagnosis returned an unexpected error: %v", err)
 	}
 	if !diagnose.AnyFindings(results) {
-		t.Fatal("atteso almeno un finding per il pod in CrashLoopBackOff/OOMKilled")
+		t.Fatal("expected at least one finding for the pod in CrashLoopBackOff/OOMKilled")
 	}
 }

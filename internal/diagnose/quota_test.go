@@ -30,7 +30,7 @@ func replicaSet(name string) appsv1.ReplicaSet {
 	}
 }
 
-func TestQuota_Superata(t *testing.T) {
+func TestQuota_Exceeded(t *testing.T) {
 	rs := []appsv1.ReplicaSet{replicaSet("app-abc123")}
 	events := []corev1.Event{
 		event("rs-uid", "FailedCreate", `Error creating: pods "app-abc123-" is forbidden: exceeded quota: compute-quota, requested: limits.cpu=1, used: limits.cpu=4, limited: limits.cpu=4`),
@@ -39,17 +39,17 @@ func TestQuota_Superata(t *testing.T) {
 
 	res, err := diagnose.Quota{}.Diagnose(t.Context(), target)
 	if err != nil {
-		t.Fatalf("Diagnose ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
 	}
 	if len(res.Findings) != 1 || res.Findings[0].CheckID != string(diagnose.CauseQuotaExceeded) {
-		t.Fatalf("atteso 1 finding %q, got %+v", diagnose.CauseQuotaExceeded, res.Findings)
+		t.Fatalf("expected 1 finding %q, got %+v", diagnose.CauseQuotaExceeded, res.Findings)
 	}
 	if res.Findings[0].Resource.Kind != "ReplicaSet" {
-		t.Errorf("Resource.Kind = %q, atteso ReplicaSet: il Pod non arriva a esistere quando la quota blocca la creazione", res.Findings[0].Resource.Kind)
+		t.Errorf("Resource.Kind = %q, expected ReplicaSet: the Pod is never created when quota blocks creation", res.Findings[0].Resource.Kind)
 	}
 }
 
-func TestQuota_Undetermined_FailedCreateNonDiQuota(t *testing.T) {
+func TestQuota_Undetermined_FailedCreateNotQuotaRelated(t *testing.T) {
 	rs := []appsv1.ReplicaSet{replicaSet("app-abc123")}
 	events := []corev1.Event{
 		event("rs-uid", "FailedCreate", `Error creating: admission webhook "policy.example.com" denied the request: missing required label`),
@@ -58,25 +58,25 @@ func TestQuota_Undetermined_FailedCreateNonDiQuota(t *testing.T) {
 
 	res, err := diagnose.Quota{}.Diagnose(t.Context(), target)
 	if err != nil {
-		t.Fatalf("Diagnose ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
 	}
 	if len(res.Findings) != 1 || res.Findings[0].CheckID != string(diagnose.CauseQuotaUndetermined) {
-		t.Fatalf("atteso 1 finding %q, got %+v", diagnose.CauseQuotaUndetermined, res.Findings)
+		t.Fatalf("expected 1 finding %q, got %+v", diagnose.CauseQuotaUndetermined, res.Findings)
 	}
 	if !res.Findings[0].Undetermined {
-		t.Error("un FailedCreate senza menzione di quota deve restare Undetermined, non presumere una causa")
+		t.Error("a FailedCreate without a quota reference must remain Undetermined; do not assume a cause")
 	}
 }
 
-func TestQuota_NessunProblema_SenzaFailedCreate(t *testing.T) {
+func TestQuota_NoIssue_WithoutFailedCreate(t *testing.T) {
 	rs := []appsv1.ReplicaSet{replicaSet("app-abc123")}
 	target := newTarget(t, nil, nil, rs)
 
 	res, err := diagnose.Quota{}.Diagnose(t.Context(), target)
 	if err != nil {
-		t.Fatalf("Diagnose ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
 	}
 	if len(res.Findings) != 0 {
-		t.Fatalf("nessun evento FailedCreate non deve produrre finding, got %+v", res.Findings)
+		t.Fatalf("the absence of FailedCreate events must produce no findings, got %+v", res.Findings)
 	}
 }

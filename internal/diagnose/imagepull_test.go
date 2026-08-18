@@ -39,14 +39,14 @@ func TestImagePull_TagNotFound(t *testing.T) {
 
 	res, err := diagnose.ImagePull{}.Diagnose(t.Context(), target)
 	if err != nil {
-		t.Fatalf("Diagnose ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
 	}
 	if len(res.Findings) != 1 || res.Findings[0].CheckID != string(diagnose.CauseImagePullTagNotFound) {
-		t.Fatalf("atteso 1 finding %q, got %+v", diagnose.CauseImagePullTagNotFound, res.Findings)
+		t.Fatalf("expected 1 finding %q, got %+v", diagnose.CauseImagePullTagNotFound, res.Findings)
 	}
 }
 
-func TestImagePull_CredenzialiMancanti(t *testing.T) {
+func TestImagePull_CredentialsMissing(t *testing.T) {
 	pods := []corev1.Pod{podWith("app-1", "app-1-uid", corev1.PodPending, corev1.ContainerStatus{
 		Name:  "app",
 		Image: "registry.example.com/private/app:v1",
@@ -59,14 +59,14 @@ func TestImagePull_CredenzialiMancanti(t *testing.T) {
 
 	res, err := diagnose.ImagePull{}.Diagnose(t.Context(), target)
 	if err != nil {
-		t.Fatalf("Diagnose ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
 	}
 	if len(res.Findings) != 1 || res.Findings[0].CheckID != string(diagnose.CauseImagePullUnauthorized) {
-		t.Fatalf("atteso 1 finding %q, got %+v", diagnose.CauseImagePullUnauthorized, res.Findings)
+		t.Fatalf("expected 1 finding %q, got %+v", diagnose.CauseImagePullUnauthorized, res.Findings)
 	}
 }
 
-func TestImagePull_RegistryNonRaggiungibile(t *testing.T) {
+func TestImagePull_RegistryUnreachable(t *testing.T) {
 	pods := []corev1.Pod{podWith("app-1", "app-1-uid", corev1.PodPending, corev1.ContainerStatus{
 		Name:  "app",
 		Image: "registry.internal:5000/app:v1",
@@ -79,14 +79,14 @@ func TestImagePull_RegistryNonRaggiungibile(t *testing.T) {
 
 	res, err := diagnose.ImagePull{}.Diagnose(t.Context(), target)
 	if err != nil {
-		t.Fatalf("Diagnose ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
 	}
 	if len(res.Findings) != 1 || res.Findings[0].CheckID != string(diagnose.CauseImagePullRegistryUnreachable) {
-		t.Fatalf("atteso 1 finding %q, got %+v", diagnose.CauseImagePullRegistryUnreachable, res.Findings)
+		t.Fatalf("expected 1 finding %q, got %+v", diagnose.CauseImagePullRegistryUnreachable, res.Findings)
 	}
 }
 
-func TestImagePull_Undetermined_NessunEventoRiconosciuto(t *testing.T) {
+func TestImagePull_Undetermined_NoRecognizedEvent(t *testing.T) {
 	pods := []corev1.Pod{podWith("app-1", "app-1-uid", corev1.PodPending, corev1.ContainerStatus{
 		Name:  "app",
 		Image: "registry.example.com/app:v1",
@@ -96,18 +96,18 @@ func TestImagePull_Undetermined_NessunEventoRiconosciuto(t *testing.T) {
 
 	res, err := diagnose.ImagePull{}.Diagnose(t.Context(), target)
 	if err != nil {
-		t.Fatalf("Diagnose ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
 	}
 	if len(res.Findings) != 1 {
-		t.Fatalf("atteso 1 finding, got %+v", res.Findings)
+		t.Fatalf("expected 1 finding, got %+v", res.Findings)
 	}
 	f := res.Findings[0]
 	if f.CheckID != string(diagnose.CauseImagePullUndetermined) || !f.Undetermined {
-		t.Fatalf("atteso finding non determinato senza un evento Failed riconoscibile, got %+v", f)
+		t.Fatalf("expected an undetermined finding without a recognizable Failed event, got %+v", f)
 	}
 }
 
-func TestImagePull_NessunProblema_ContainerInEsecuzione(t *testing.T) {
+func TestImagePull_NoProblem_ContainerRunning(t *testing.T) {
 	pods := []corev1.Pod{podWith("app-1", "app-1-uid", corev1.PodRunning, corev1.ContainerStatus{
 		Name:  "app",
 		Image: "registry.example.com/app:v1",
@@ -117,9 +117,9 @@ func TestImagePull_NessunProblema_ContainerInEsecuzione(t *testing.T) {
 
 	res, err := diagnose.ImagePull{}.Diagnose(t.Context(), target)
 	if err != nil {
-		t.Fatalf("Diagnose ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
 	}
 	if len(res.Findings) != 0 {
-		t.Fatalf("un container in esecuzione normale non deve produrre finding, got %+v", res.Findings)
+		t.Fatalf("a normally running container must not produce findings, got %+v", res.Findings)
 	}
 }

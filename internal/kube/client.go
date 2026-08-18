@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package kube costruisce i client verso l'API server e risolve i
-// riferimenti <kind>/<name> passati sulla riga di comando in oggetti
-// concreti. E' l'unico package che sa come parlare a client-go/
-// cli-runtime: il resto del programma lavora su internal/workload.Workload
-// e su client-go/kubernetes.Interface passati per interfaccia, cosi' i
-// test usano client-go/kubernetes/fake senza toccare kubeconfig reali.
+// Package kube builds clients for the API server and resolves
+// <kind>/<name> references passed on the command line into concrete
+// objects. It is the only package that knows how to interact with client-go/
+// cli-runtime: the rest of the program works with internal/workload.Workload
+// and client-go/kubernetes.Interface passed as interfaces, so tests use
+// client-go/kubernetes/fake without touching real kubeconfigs.
 package kube
 
 import (
@@ -29,9 +29,9 @@ import (
 	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
-// Clients raggruppa i client costruiti a partire dal kubeconfig
-// dell'utente. Metrics e' nil quando metrics-server non risponde: e'
-// responsabilita' del chiamante degradare, non di questo package fallire.
+// Clients groups the clients built from the user's kubeconfig. Metrics is nil
+// when metrics-server does not respond: degrading is the caller's
+// responsibility; this package must not fail.
 type Clients struct {
 	Config    *rest.Config
 	Clientset kubernetes.Interface
@@ -39,30 +39,29 @@ type Clients struct {
 	Namespace string
 }
 
-// NewClients rispetta kubeconfig, context e flag standard di kubectl
-// tramite genericclioptions.ConfigFlags, cosi' il plugin si comporta come
-// ogni altro sottocomando di kubectl (--context, --namespace, ecc.).
+// NewClients honors kubectl's kubeconfig, context, and standard flags through
+// genericclioptions.ConfigFlags, so the plugin behaves like any other kubectl
+// subcommand (--context, --namespace, etc.).
 func NewClients(flags *genericclioptions.ConfigFlags) (*Clients, error) {
 	restConfig, err := flags.ToRESTConfig()
 	if err != nil {
-		return nil, fmt.Errorf("costruzione configurazione da kubeconfig: %w", err)
+		return nil, fmt.Errorf("building configuration from kubeconfig: %w", err)
 	}
 
 	clientset, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
-		return nil, fmt.Errorf("creazione client Kubernetes: %w", err)
+		return nil, fmt.Errorf("creating Kubernetes client: %w", err)
 	}
 
 	namespace, _, err := flags.ToRawKubeConfigLoader().Namespace()
 	if err != nil {
-		return nil, fmt.Errorf("risoluzione namespace da kubeconfig: %w", err)
+		return nil, fmt.Errorf("resolving namespace from kubeconfig: %w", err)
 	}
 
-	// Il client metrics e' opzionale: se metrics-server non e'
-	// installato la creazione del client stesso non fallisce (non fa
-	// una chiamata di rete), quindi qui non e' ancora possibile
-	// distinguere "assente" da "presente". La degradazione avviene al
-	// primo uso, nelle singole verifiche che lo consultano.
+	// The metrics client is optional: if metrics-server is not installed,
+	// creating the client itself does not fail (it makes no network call),
+	// so it is not yet possible to distinguish "absent" from "present"
+	// here. Degradation happens on first use, in each check that queries it.
 	metricsClient, err := metricsclientset.NewForConfig(restConfig)
 	if err != nil {
 		metricsClient = nil

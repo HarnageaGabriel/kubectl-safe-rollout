@@ -24,22 +24,22 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/model"
 )
 
-// ImagePullDiagnoserID e' l'identificativo stabile della categoria, usato
-// come Result.DiagnoserID.
+// ImagePullDiagnoserID is the stable category identifier, used as
+// Result.DiagnoserID.
 const ImagePullDiagnoserID = "imagepull"
 
-// ImagePull classifica i container in ImagePullBackOff/ErrImagePull
-// distinguendo tag/digest inesistente, registry non raggiungibile e
-// credenziali mancanti. Il segnale strutturato (ContainerState.Waiting.
-// Reason) identifica solo che il pull fallisce; il perche' vive nel
-// messaggio testuale dell'evento Reason=="Failed" associato, isolato in
+// ImagePull classifies containers in ImagePullBackOff/ErrImagePull,
+// distinguishing a missing tag/digest, an unreachable registry, and
+// missing credentials. The structured signal (ContainerState.Waiting.
+// Reason) only identifies that the pull fails; the reason is in the text
+// of the associated Reason=="Failed" event, isolated in
 // internal/diagnose/pattern.
 type ImagePull struct{}
 
-// ID implementa Diagnoser.
+// ID implements Diagnoser.
 func (ImagePull) ID() string { return ImagePullDiagnoserID }
 
-// Diagnose implementa Diagnoser.
+// Diagnose implements Diagnoser.
 func (d ImagePull) Diagnose(_ context.Context, target Target) (Result, error) {
 	var findings []model.Finding
 	for _, pod := range target.Pods {
@@ -73,7 +73,7 @@ func (d ImagePull) classify(pod corev1.Pod, cs corev1.ContainerStatus, events []
 		if !ok {
 			continue
 		}
-		evidence := append(append([]string(nil), base...), fmt.Sprintf("evento: %s", e.Message))
+		evidence := append(append([]string(nil), base...), fmt.Sprintf("event: %s", e.Message))
 		return d.findingForCause(cause, pod, cs, resource, evidence)
 	}
 
@@ -88,13 +88,13 @@ func (ImagePull) findingForCause(cause string, pod corev1.Pod, cs corev1.Contain
 			CheckID:  string(CauseImagePullTagNotFound),
 			Severity: model.SeverityHigh,
 			Cause: fmt.Sprintf(
-				"il container %q di %s non riesce a tirare l'immagine %q: tag o digest inesistente sul registry",
+				"container %q in %s cannot pull image %q: tag or digest does not exist in the registry",
 				cs.Name, resource, image,
 			),
 			Evidence: evidence,
 			Remediation: model.Remediation{
 				Summary: fmt.Sprintf(
-					"verifica che %q esista con quel tag/digest sul registry: probabile refuso nel tag, o la build non e' ancora stata pubblicata",
+					"verify that %q exists with that tag/digest in the registry: the tag may contain a typo, or the build may not have been published yet",
 					image,
 				),
 				ContextDependent: true,
@@ -106,12 +106,12 @@ func (ImagePull) findingForCause(cause string, pod corev1.Pod, cs corev1.Contain
 			CheckID:  string(CauseImagePullUnauthorized),
 			Severity: model.SeverityHigh,
 			Cause: fmt.Sprintf(
-				"il container %q di %s non riesce a tirare l'immagine %q: il registry rifiuta il pull per autenticazione o autorizzazione mancante",
+				"container %q in %s cannot pull image %q: the registry rejects the pull because authentication or authorization is missing",
 				cs.Name, resource, image,
 			),
 			Evidence: evidence,
 			Remediation: model.Remediation{
-				Summary:          fmt.Sprintf("aggiungi o rinnova imagePullSecrets sul ServiceAccount o sul Pod per il registry di %q", image),
+				Summary:          fmt.Sprintf("add or renew imagePullSecrets on the ServiceAccount or Pod for the registry hosting %q", image),
 				Commands:         []string{fmt.Sprintf("kubectl get pod %s -n %s -o jsonpath={.spec.imagePullSecrets}", pod.Name, pod.Namespace)},
 				ContextDependent: true,
 			},
@@ -122,22 +122,21 @@ func (ImagePull) findingForCause(cause string, pod corev1.Pod, cs corev1.Contain
 			CheckID:  string(CauseImagePullRegistryUnreachable),
 			Severity: model.SeverityHigh,
 			Cause: fmt.Sprintf(
-				"il container %q di %s non riesce a tirare l'immagine %q: il registry non e' raggiungibile dal cluster (DNS, rete o timeout)",
+				"container %q in %s cannot pull image %q: the registry is unreachable from the cluster (DNS, network, or timeout)",
 				cs.Name, resource, image,
 			),
 			Evidence: evidence,
 			Remediation: model.Remediation{
-				Summary:          fmt.Sprintf("verifica la raggiungibilita' del registry che serve %q dal nodo (DNS, network policy, proxy) o lo stato del registry stesso", image),
+				Summary:          fmt.Sprintf("verify from the node that the registry hosting %q is reachable (DNS, network policy, proxy), or check the registry itself", image),
 				ContextDependent: true,
 			},
 			Resource: resource,
 		}
 	default:
-		// Non dovrebbe accadere: pattern.ImagePullFailure restituisce
-		// solo queste tre stringhe quando ok=true. Se succede e' un bug
-		// interno di allineamento tra i due package, non una condizione
-		// del cluster: torna undetermined invece di un finding con
-		// CheckID inventato.
+		// This should not happen: pattern.ImagePullFailure returns only
+		// these three strings when ok=true. If it does, it is an internal
+		// alignment bug between the two packages, not a cluster condition:
+		// return undetermined instead of a finding with an invented CheckID.
 		return ImagePull{}.undetermined(resource, evidence)
 	}
 }
@@ -146,10 +145,10 @@ func (ImagePull) undetermined(resource model.ResourceRef, evidence []string) mod
 	return model.Finding{
 		CheckID:  string(CauseImagePullUndetermined),
 		Severity: model.SeverityHigh,
-		Cause:    fmt.Sprintf("%s non riesce a tirare l'immagine ma nessun evento riconosciuto ne spiega il motivo", resource),
+		Cause:    fmt.Sprintf("%s cannot pull the image but no recognized event explains why", resource),
 		Evidence: evidence,
 		Remediation: model.Remediation{
-			Summary:          "raccogli piu' contesto: describe del pod per il testo completo dell'evento di pull",
+			Summary:          "collect more context: describe the pod to see the full pull event message",
 			Commands:         []string{fmt.Sprintf("kubectl describe pod %s -n %s", resource.Name, resource.Namespace)},
 			ContextDependent: true,
 		},

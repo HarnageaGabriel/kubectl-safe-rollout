@@ -32,7 +32,7 @@ func TestSplitRef(t *testing.T) {
 	}{
 		{ref: "deployment/api", wantKind: "deployment", wantName: "api"},
 		{ref: "deploy/checkout", wantKind: "deploy", wantName: "checkout"},
-		{ref: "senza-slash", wantErr: true},
+		{ref: "without-slash", wantErr: true},
 		{ref: "deployment/", wantErr: true},
 		{ref: "/api", wantErr: true},
 		{ref: "", wantErr: true},
@@ -43,15 +43,15 @@ func TestSplitRef(t *testing.T) {
 			kind, name, err := splitRef(tc.ref)
 			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("splitRef(%q) errore atteso, got nil", tc.ref)
+					t.Fatalf("splitRef(%q) expected error, got nil", tc.ref)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("splitRef(%q) errore inatteso: %v", tc.ref, err)
+				t.Fatalf("splitRef(%q) unexpected error: %v", tc.ref, err)
 			}
 			if kind != tc.wantKind || name != tc.wantName {
-				t.Errorf("splitRef(%q) = (%q, %q), atteso (%q, %q)", tc.ref, kind, name, tc.wantKind, tc.wantName)
+				t.Errorf("splitRef(%q) = (%q, %q), expected (%q, %q)", tc.ref, kind, name, tc.wantKind, tc.wantName)
 			}
 		})
 	}
@@ -69,24 +69,24 @@ func TestResolveWorkload_Deployment(t *testing.T) {
 		t.Fatalf("ResolveWorkload: %v", err)
 	}
 	if w.Name() != "checkout" || w.Replicas() != 3 {
-		t.Errorf("workload risolto = {Name: %q, Replicas: %d}, atteso {checkout, 3}", w.Name(), w.Replicas())
+		t.Errorf("resolved workload = {Name: %q, Replicas: %d}, expected {checkout, 3}", w.Name(), w.Replicas())
 	}
 }
 
-func TestResolveWorkload_KindNonSupportato(t *testing.T) {
+func TestResolveWorkload_UnsupportedKind(t *testing.T) {
 	client := fake.NewSimpleClientset()
 
 	_, err := ResolveWorkload(context.Background(), client, "default", "statefulset/checkout")
 	if err == nil {
-		t.Fatal("atteso errore per kind non supportato nell'MVP, got nil")
+		t.Fatal("expected error for kind unsupported in MVP, got nil")
 	}
 }
 
-func TestResolveWorkload_NonTrovato(t *testing.T) {
+func TestResolveWorkload_NotFound(t *testing.T) {
 	client := fake.NewSimpleClientset()
 
 	_, err := ResolveWorkload(context.Background(), client, "default", "deployment/assente")
 	if err == nil {
-		t.Fatal("atteso errore per Deployment inesistente, got nil")
+		t.Fatal("expected error for nonexistent Deployment, got nil")
 	}
 }

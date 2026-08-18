@@ -24,26 +24,26 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/model"
 )
 
-// CrashLoopDiagnoserID e' l'identificativo stabile della categoria,
-// usato come Result.DiagnoserID (non come model.Finding.CheckID: quello
-// porta la CauseID specifica, vedi cause.go).
+// CrashLoopDiagnoserID is the stable category identifier, used as
+// Result.DiagnoserID (not as model.Finding.CheckID: that contains the
+// specific CauseID, see cause.go).
 const CrashLoopDiagnoserID = "crashloop"
 
-// CrashLoop classifica i container in CrashLoopBackOff distinguendo
-// OOMKill, terminazione da liveness probe ed errore applicativo.
+// CrashLoop classifies containers in CrashLoopBackOff, distinguishing
+// OOMKill, liveness probe termination, and application errors.
 //
-// Ordine di precedenza deliberato: l'evento di liveness probe si
-// controlla prima di ContainerStatus.LastTerminationState, perche'
-// quando e' la probe a uccidere il container il Reason del Terminated
-// e' spesso il generico "Error", indistinguibile altrimenti da un crash
-// applicativo. L'evento "Killing" con menzione della liveness probe e'
-// il segnale piu' specifico disponibile e va verificato per primo.
+// Deliberate precedence order: the liveness probe event is checked before
+// ContainerStatus.LastTerminationState because when the probe kills the
+// container, the Terminated Reason is often the generic "Error", otherwise
+// indistinguishable from an application crash. The "Killing" event that
+// mentions the liveness probe is the most specific available signal and
+// must be checked first.
 type CrashLoop struct{}
 
-// ID implementa Diagnoser.
+// ID implements Diagnoser.
 func (CrashLoop) ID() string { return CrashLoopDiagnoserID }
 
-// Diagnose implementa Diagnoser.
+// Diagnose implements Diagnoser.
 func (d CrashLoop) Diagnose(ctx context.Context, target Target) (Result, error) {
 	var findings []model.Finding
 	for _, pod := range target.Pods {
@@ -71,14 +71,14 @@ func (d CrashLoop) classify(ctx context.Context, target Target, pod corev1.Pod, 
 	term := cs.LastTerminationState.Terminated
 	switch {
 	case term == nil:
-		evidence := append(append([]string(nil), base...), fmt.Sprintf("container=%s in CrashLoopBackOff, LastTerminationState.Terminated non popolato", cs.Name))
+		evidence := append(append([]string(nil), base...), fmt.Sprintf("container=%s in CrashLoopBackOff, LastTerminationState.Terminated not populated", cs.Name))
 		return d.undetermined(resource, evidence)
 	case term.Reason == "OOMKilled":
 		return d.classifyOOMKilled(pod, cs, term, resource, base)
 	case term.Reason != "":
 		return d.classifyAppError(ctx, target, pod, cs, term, resource, base)
 	default:
-		evidence := append(append([]string(nil), base...), fmt.Sprintf("container=%s in CrashLoopBackOff, Terminated.Reason vuoto", cs.Name))
+		evidence := append(append([]string(nil), base...), fmt.Sprintf("container=%s in CrashLoopBackOff, Terminated.Reason empty", cs.Name))
 		return d.undetermined(resource, evidence)
 	}
 }
@@ -88,18 +88,18 @@ func (CrashLoop) classifyLivenessKilling(target Target, pod corev1.Pod, cs corev
 		if !pattern.LivenessKilling(e.Reason, e.Message, cs.Name) {
 			continue
 		}
-		evidence := append(append([]string(nil), base...), fmt.Sprintf("evento: %s", e.Message))
+		evidence := append(append([]string(nil), base...), fmt.Sprintf("event: %s", e.Message))
 		return model.Finding{
 			CheckID:  string(CauseCrashLoopLivenessProbe),
 			Severity: model.SeverityHigh,
 			Cause: fmt.Sprintf(
-				"il container %q di %s viene terminato dal kubelet perche' la liveness probe fallisce ripetutamente, non per un crash dell'applicazione",
+				"container %q in %s is terminated by the kubelet because the liveness probe repeatedly fails, not because the application crashes",
 				cs.Name, resource,
 			),
 			Evidence: evidence,
 			Remediation: model.Remediation{
 				Summary: fmt.Sprintf(
-					"la liveness probe di %q termina il container prima che l'app sia pronta: aumenta initialDelaySeconds/periodSeconds/failureThreshold, o verifica che l'endpoint di liveness risponda correttamente durante l'avvio (valuta una startupProbe se l'avvio e' lento)",
+					"the liveness probe for %q terminates the container before the app is ready: increase initialDelaySeconds/periodSeconds/failureThreshold, or verify that the liveness endpoint responds correctly during startup (consider a startupProbe if startup is slow)",
 					cs.Name,
 				),
 				ContextDependent: true,
@@ -116,13 +116,13 @@ func (CrashLoop) classifyOOMKilled(pod corev1.Pod, cs corev1.ContainerStatus, te
 		CheckID:  string(CauseCrashLoopOOMKilled),
 		Severity: model.SeverityHigh,
 		Cause: fmt.Sprintf(
-			"il container %q di %s viene ucciso dal kernel (OOMKilled) per superamento del limite di memoria",
+			"container %q in %s is killed by the kernel (OOMKilled) for exceeding its memory limit",
 			cs.Name, resource,
 		),
 		Evidence: evidence,
 		Remediation: model.Remediation{
 			Summary: fmt.Sprintf(
-				"aumenta limits.memory del container %q o riduci il consumo di memoria dell'app; il valore corretto dipende dal profilo reale di utilizzo, non e' un numero sicuro da suggerire alla cieca",
+				"increase limits.memory for container %q or reduce the app's memory usage; the correct value depends on the actual usage profile and cannot be safely suggested without context",
 				cs.Name,
 			),
 			ContextDependent: true,
@@ -131,29 +131,29 @@ func (CrashLoop) classifyOOMKilled(pod corev1.Pod, cs corev1.ContainerStatus, te
 	}
 }
 
-// classifyAppError e' l'unico ramo che recupera i log del container
-// precedente come evidenza supplementare: e' il caso in cui la causa e'
-// applicativa e non c'e' altro segnale strutturato oltre all'exit code,
-// quindi e' dove i log aggiungono davvero valore. Il fetch e' best
-// effort: se fallisce o LogTailer e' nil, il Finding resta valido senza
-// quella riga.
+// classifyAppError is the only branch that retrieves logs from the
+// previous container as additional evidence: this is the case where the
+// cause is in the application and there is no structured signal besides
+// the exit code, so this is where logs provide real value. The fetch is
+// best effort: if it fails or LogTailer is nil, the Finding remains valid
+// without that line.
 func (CrashLoop) classifyAppError(ctx context.Context, target Target, pod corev1.Pod, cs corev1.ContainerStatus, term *corev1.ContainerStateTerminated, resource model.ResourceRef, base []string) model.Finding {
 	evidence := append(append([]string(nil), base...), fmt.Sprintf("exitCode=%d reason=%s", term.ExitCode, term.Reason))
 	if target.LogTailer != nil {
 		if tail, err := target.LogTailer.PreviousLogTail(ctx, pod.Namespace, pod.Name, cs.Name, 3); err == nil && tail != "" {
-			evidence = append(evidence, fmt.Sprintf("log --previous (ultime righe): %s", tail))
+			evidence = append(evidence, fmt.Sprintf("log --previous (last lines): %s", tail))
 		}
 	}
 	return model.Finding{
 		CheckID:  string(CauseCrashLoopAppError),
 		Severity: model.SeverityHigh,
 		Cause: fmt.Sprintf(
-			"il container %q di %s termina con causa applicativa (exit code %d), ne' OOMKill ne' liveness probe",
+			"container %q in %s exits due to an application error (exit code %d), neither OOMKill nor liveness probe",
 			cs.Name, resource, term.ExitCode,
 		),
 		Evidence: evidence,
 		Remediation: model.Remediation{
-			Summary:          fmt.Sprintf("controlla i log del container %q per la causa applicativa dell'uscita", cs.Name),
+			Summary:          fmt.Sprintf("check the logs for container %q to find the application cause of the exit", cs.Name),
 			Commands:         []string{fmt.Sprintf("kubectl logs %s -c %s -n %s --previous", pod.Name, cs.Name, pod.Namespace)},
 			ContextDependent: true,
 		},
@@ -165,10 +165,10 @@ func (CrashLoop) undetermined(resource model.ResourceRef, evidence []string) mod
 	return model.Finding{
 		CheckID:  string(CauseCrashLoopUndetermined),
 		Severity: model.SeverityHigh,
-		Cause:    fmt.Sprintf("%s e' in CrashLoopBackOff ma l'evidenza raccolta non distingue OOMKill, liveness probe o errore applicativo", resource),
+		Cause:    fmt.Sprintf("%s is in CrashLoopBackOff but the collected evidence does not distinguish OOMKill, liveness probe, or application error", resource),
 		Evidence: evidence,
 		Remediation: model.Remediation{
-			Summary:          "raccogli piu' contesto prima di intervenire: describe del pod e log del container precedente",
+			Summary:          "collect more context before acting: describe the pod and inspect the previous container logs",
 			Commands:         []string{fmt.Sprintf("kubectl describe pod %s -n %s", resource.Name, resource.Namespace)},
 			ContextDependent: true,
 		},

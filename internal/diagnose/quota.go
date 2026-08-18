@@ -22,21 +22,21 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/model"
 )
 
-// QuotaDiagnoserID e' l'identificativo stabile della categoria, usato
-// come Result.DiagnoserID.
+// QuotaDiagnoserID is the stable category identifier, used as
+// Result.DiagnoserID.
 const QuotaDiagnoserID = "quota"
 
-// Quota classifica i fallimenti di creazione dei pod bloccati
-// dall'admission plugin di ResourceQuota. E' l'unico Diagnoser che non
-// opera sui Pod del workload: quando la quota blocca la creazione, il
-// Pod non arriva mai a esistere, quindi non c'e' Pod da ispezionare. Il
-// segnale vive sull'evento Reason=="FailedCreate" del ReplicaSet.
+// Quota classifies pod creation failures blocked by the ResourceQuota
+// admission plugin. It is the only Diagnoser that does not operate on the
+// workload's Pods: when quota blocks creation, the Pod never exists, so
+// there is no Pod to inspect. The signal is on the ReplicaSet's
+// Reason=="FailedCreate" event.
 type Quota struct{}
 
-// ID implementa Diagnoser.
+// ID implements Diagnoser.
 func (Quota) ID() string { return QuotaDiagnoserID }
 
-// Diagnose implementa Diagnoser.
+// Diagnose implements Diagnoser.
 func (d Quota) Diagnose(_ context.Context, target Target) (Result, error) {
 	var findings []model.Finding
 	for _, rs := range target.ReplicaSets {
@@ -45,15 +45,15 @@ func (d Quota) Diagnose(_ context.Context, target Target) (Result, error) {
 			if e.Reason != "FailedCreate" {
 				continue
 			}
-			evidence := []string{fmt.Sprintf("evento: %s", e.Message)}
+			evidence := []string{fmt.Sprintf("event: %s", e.Message)}
 			if pattern.QuotaExceeded(e.Message) {
 				findings = append(findings, model.Finding{
 					CheckID:  string(CauseQuotaExceeded),
 					Severity: model.SeverityHigh,
-					Cause:    fmt.Sprintf("%s non riesce a creare pod: la ResourceQuota del namespace e' esaurita", resource),
+					Cause:    fmt.Sprintf("%s cannot create pods: the namespace ResourceQuota is exhausted", resource),
 					Evidence: evidence,
 					Remediation: model.Remediation{
-						Summary:          "aumenta la ResourceQuota del namespace, riduci le request del workload, o libera capacita' terminando altri workload; la scelta corretta dipende da cosa il namespace ospita e da chi ne ha autorita'",
+						Summary:          "increase the namespace ResourceQuota, reduce workload requests, or free capacity by terminating other workloads; the correct choice depends on what the namespace hosts and who has authority over it",
 						Commands:         []string{fmt.Sprintf("kubectl describe resourcequota -n %s", rs.Namespace)},
 						ContextDependent: true,
 					},
@@ -64,10 +64,10 @@ func (d Quota) Diagnose(_ context.Context, target Target) (Result, error) {
 			findings = append(findings, model.Finding{
 				CheckID:  string(CauseQuotaUndetermined),
 				Severity: model.SeverityHigh,
-				Cause:    fmt.Sprintf("%s non riesce a creare pod, ma il messaggio dell'evento non menziona una ResourceQuota superata", resource),
+				Cause:    fmt.Sprintf("%s cannot create pods, but the event message does not mention an exceeded ResourceQuota", resource),
 				Evidence: evidence,
 				Remediation: model.Remediation{
-					Summary:          "leggi il messaggio completo dell'evento FailedCreate: potrebbe essere un webhook di ammissione o un altro vincolo, non necessariamente una quota",
+					Summary:          "read the full FailedCreate event message: it may be an admission webhook or another constraint, not necessarily a quota",
 					Commands:         []string{fmt.Sprintf("kubectl describe replicaset %s -n %s", rs.Name, rs.Namespace)},
 					ContextDependent: true,
 				},

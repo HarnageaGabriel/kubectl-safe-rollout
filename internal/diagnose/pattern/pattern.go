@@ -12,49 +12,46 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package pattern isola tutto il parsing di testo libero (Event.Message
-// di kubelet, scheduler e container runtime) usato da internal/diagnose.
-// E' un punto solo, deliberatamente: questi messaggi non sono un'API
-// stabile di Kubernetes, cambiano tra versioni e tra runtime (containerd
-// vs CRI-O producono testi diversi per lo stesso errore di pull), e
-// spargere string matching nella logica di classificazione renderebbe
-// impossibile capire, aggiornare o testare in un colpo solo cosa questo
-// progetto riconosce.
+// Package pattern isolates all free-text parsing (Event.Message from the
+// kubelet, scheduler, and container runtime) used by internal/diagnose. It
+// is deliberately a single point: these messages are not a stable
+// Kubernetes API, they change across versions and runtimes (containerd vs
+// CRI-O produce different text for the same pull error), and scattering
+// string matching through classification logic would make it impossible to
+// understand, update, or test in one place what this project recognizes.
 //
-// Ogni funzione qui distingue segnali strutturati da segnali testuali:
-// dove Kubernetes espone un campo stabile (Reason di un Event o di un
-// ContainerState, Phase di una PersistentVolumeClaim), i Diagnoser lo
-// usano direttamente e non passano da questo package. Qui vive solo cio'
-// che non ha alternativa strutturata. Ogni funzione restituisce ok=false
-// quando nessun pattern noto combacia: il chiamante deve trattarlo come
-// causa non determinata, mai scegliere a indovinare.
+// Every function here distinguishes structured signals from textual ones:
+// where Kubernetes exposes a stable field (Reason on an Event or
+// ContainerState, Phase on a PersistentVolumeClaim), Diagnosers use it
+// directly and do not go through this package. Only signals with no
+// structured alternative live here. Every function returns ok=false when
+// no known pattern matches: the caller must treat it as an undetermined
+// cause, never choose by guessing.
 package pattern
 
 import "strings"
 
-// ImagePullFailure classifica il messaggio di un evento Reason=="Failed"
-// generato durante il pull di un'immagine (tipicamente affiancato da un
-// container in stato Waiting con Reason "ImagePullBackOff" o
-// "ErrImagePull", che il chiamante ha gia' verificato separatamente
-// tramite il campo strutturato).
+// ImagePullFailure classifies the message of a Reason=="Failed" event
+// generated while pulling an image (typically alongside a container in
+// Waiting state with Reason "ImagePullBackOff" or "ErrImagePull", which
+// the caller has already checked separately through the structured field).
 func ImagePullFailure(message string) (cause string, ok bool) {
 	m := strings.ToLower(message)
 	switch {
-	// "repository does not exist" e' deliberatamente escluso da questo
-	// caso: e' anche il testo del messaggio classico di Docker per un
-	// pull rifiutato per autorizzazione ("pull access denied for X,
-	// repository does not exist or may require 'docker login'"), non
-	// solo per un'immagine davvero assente. "failed to resolve
-	// reference" e' escluso allo stesso modo: e' un prefisso generico
-	// che containerd usa per QUALUNQUE fallimento di risoluzione
-	// (verificato su kind v0.32/containerd 2.2: compare identico nei
-	// messaggi di tag inesistente, credenziali mancanti e registry
-	// irraggiungibile), non specifico di "non trovato". Il suffisso
-	// ": not found" invece lo e' davvero: nel messaggio reale di
-	// containerd 2.x compare solo quando il tag/digest non esiste
+	// "repository does not exist" is deliberately excluded from this
+	// case: it is also part of Docker's classic message for a pull rejected
+	// due to authorization ("pull access denied for X, repository does not
+	// exist or may require 'docker login'"), not only for a genuinely
+	// missing image. "failed to resolve reference" is excluded for the
+	// same reason: it is a generic prefix containerd uses for ANY resolution
+	// failure (verified on kind v0.32/containerd 2.2: it appears unchanged in
+	// messages for a missing tag, missing credentials, and an unreachable
+	// registry), not specifically for "not found". The ": not found" suffix
+	// is genuinely specific: in the real containerd 2.x message it appears
+	// only when the tag/digest does not exist
 	// ("...: docker.io/library/busybox:tag: not found"). "manifest
-	// unknown"/"manifest for ... not found" coprono containerd 1.x e
-	// CRI-O piu' vecchi.
+	// unknown"/"manifest for ... not found" cover containerd 1.x and older
+	// CRI-O versions.
 	case containsAny(m, ": not found", "manifest unknown", "manifest for", "name unknown"):
 		return "tag-not-found", true
 	case containsAny(m, "unauthorized", "pull access denied", "insufficient_scope", "authentication required", "does not exist or may require", "401", "403"):
@@ -66,15 +63,14 @@ func ImagePullFailure(message string) (cause string, ok bool) {
 	}
 }
 
-// LivenessKilling riconosce l'evento che il kubelet genera quando
-// termina un container per fallimento ripetuto della liveness probe.
-// Reason=="Killing" e' un valore stabile (costante interna del
-// kubelet, non pensata per cambiare: kubectl describe e molti tool di
-// osservabilita' vi si affidano gia'). Il messaggio associato e' testo
-// libero ("Container %s failed liveness probe, will be restarted"): la
-// combinazione dei due e' il segnale piu' affidabile disponibile senza
-// importare k8s.io/kubernetes, che non e' una dipendenza pensata per
-// consumo esterno.
+// LivenessKilling recognizes the event the kubelet generates when it
+// terminates a container after repeated liveness probe failures.
+// Reason=="Killing" is a stable value (an internal kubelet constant not
+// expected to change: kubectl describe and many observability tools already
+// rely on it). The associated message is free text ("Container %s failed
+// liveness probe, will be restarted"): the combination is the most reliable
+// signal available without importing k8s.io/kubernetes, which is not a
+// dependency intended for external use.
 func LivenessKilling(reason, message, container string) bool {
 	if reason != "Killing" {
 		return false
@@ -86,9 +82,8 @@ func LivenessKilling(reason, message, container string) bool {
 	return container == "" || strings.Contains(message, container)
 }
 
-// FailedScheduling classifica il messaggio di un evento
-// Reason=="FailedScheduling" generato dallo scheduler per un pod
-// Pending.
+// FailedScheduling classifies the message of a Reason=="FailedScheduling"
+// event generated by the scheduler for a Pending pod.
 func FailedScheduling(message string) (cause string, ok bool) {
 	m := strings.ToLower(message)
 	switch {
@@ -103,13 +98,13 @@ func FailedScheduling(message string) (cause string, ok bool) {
 	}
 }
 
-// QuotaExceeded riconosce il messaggio di un evento Reason=="FailedCreate"
-// su un ReplicaSet bloccato dall'admission plugin di ResourceQuota. Il
-// prefisso "exceeded quota:" e' generato da k8s.io/apiserver/plugin/pkg/
-// admission/resourcequota ed e' stabile da molte major version, al
-// contrario dei messaggi di scheduler/kubelet sopra: e' comunque isolato
-// qui insieme agli altri, non nella logica del Diagnoser, per lo stesso
-// motivo di manutenibilita'.
+// QuotaExceeded recognizes the message of a Reason=="FailedCreate" event
+// on a ReplicaSet blocked by the ResourceQuota admission plugin. The
+// "exceeded quota:" prefix is generated by k8s.io/apiserver/plugin/pkg/
+// admission/resourcequota and has been stable across many major versions,
+// unlike the scheduler/kubelet messages above: it is still isolated here
+// with the others, not in Diagnoser logic, for the same maintainability
+// reason.
 func QuotaExceeded(message string) bool {
 	return strings.Contains(strings.ToLower(message), "exceeded quota")
 }

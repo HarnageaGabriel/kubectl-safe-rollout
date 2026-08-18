@@ -40,28 +40,28 @@ func TestCrashLoop_OOMKilled(t *testing.T) {
 
 	res, err := diagnose.CrashLoop{}.Diagnose(t.Context(), target)
 	if err != nil {
-		t.Fatalf("Diagnose ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
 	}
 	if len(res.Findings) != 1 {
-		t.Fatalf("atteso 1 finding, got %d: %+v", len(res.Findings), res.Findings)
+		t.Fatalf("expected 1 finding, got %d: %+v", len(res.Findings), res.Findings)
 	}
 	f := res.Findings[0]
 	if f.CheckID != string(diagnose.CauseCrashLoopOOMKilled) {
-		t.Errorf("CheckID = %q, atteso %q", f.CheckID, diagnose.CauseCrashLoopOOMKilled)
+		t.Errorf("CheckID = %q, expected %q", f.CheckID, diagnose.CauseCrashLoopOOMKilled)
 	}
 	if f.Undetermined {
-		t.Error("un OOMKill confermato non deve essere Undetermined")
+		t.Error("a confirmed OOMKill must not be Undetermined")
 	}
 }
 
-func TestCrashLoop_LivenessProbe_HaPrecedenzaSuTerminatedGenerico(t *testing.T) {
+func TestCrashLoop_LivenessProbe_TakesPrecedenceOverGenericTerminated(t *testing.T) {
 	pods := []corev1.Pod{podWith("app-1", "app-1-uid", corev1.PodRunning, corev1.ContainerStatus{
 		Name:         "app",
 		RestartCount: 2,
 		State:        corev1.ContainerState{Waiting: ptrWaiting(crashLoopWaiting())},
-		// Reason generico "Error": senza l'evento Killing sarebbe
-		// indistinguibile da un crash applicativo. E' esattamente il
-		// caso che l'ordine di precedenza deve risolvere correttamente.
+		// Generic "Error" Reason: without the Killing event it would be
+		// indistinguishable from an application crash. This is exactly the
+		// case that the precedence order must resolve correctly.
 		LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
 			Reason: "Error", ExitCode: 137,
 		}},
@@ -73,18 +73,18 @@ func TestCrashLoop_LivenessProbe_HaPrecedenzaSuTerminatedGenerico(t *testing.T) 
 
 	res, err := diagnose.CrashLoop{}.Diagnose(t.Context(), target)
 	if err != nil {
-		t.Fatalf("Diagnose ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
 	}
 	if len(res.Findings) != 1 {
-		t.Fatalf("atteso 1 finding, got %d: %+v", len(res.Findings), res.Findings)
+		t.Fatalf("expected 1 finding, got %d: %+v", len(res.Findings), res.Findings)
 	}
 	f := res.Findings[0]
 	if f.CheckID != string(diagnose.CauseCrashLoopLivenessProbe) {
-		t.Errorf("CheckID = %q, atteso %q (l'evento Killing deve avere precedenza)", f.CheckID, diagnose.CauseCrashLoopLivenessProbe)
+		t.Errorf("CheckID = %q, expected %q (the Killing event must take precedence)", f.CheckID, diagnose.CauseCrashLoopLivenessProbe)
 	}
 }
 
-func TestCrashLoop_ErroreApplicativo(t *testing.T) {
+func TestCrashLoop_ApplicationError(t *testing.T) {
 	pods := []corev1.Pod{podWith("app-1", "app-1-uid", corev1.PodRunning, corev1.ContainerStatus{
 		Name:         "app",
 		RestartCount: 3,
@@ -97,48 +97,48 @@ func TestCrashLoop_ErroreApplicativo(t *testing.T) {
 
 	res, err := diagnose.CrashLoop{}.Diagnose(t.Context(), target)
 	if err != nil {
-		t.Fatalf("Diagnose ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
 	}
 	if len(res.Findings) != 1 {
-		t.Fatalf("atteso 1 finding, got %d: %+v", len(res.Findings), res.Findings)
+		t.Fatalf("expected 1 finding, got %d: %+v", len(res.Findings), res.Findings)
 	}
 	f := res.Findings[0]
 	if f.CheckID != string(diagnose.CauseCrashLoopAppError) {
-		t.Errorf("CheckID = %q, atteso %q", f.CheckID, diagnose.CauseCrashLoopAppError)
+		t.Errorf("CheckID = %q, expected %q", f.CheckID, diagnose.CauseCrashLoopAppError)
 	}
 	if len(f.Remediation.Commands) == 0 {
-		t.Error("atteso un comando di sola lettura (kubectl logs --previous) come guida per la diagnosi")
+		t.Error("expected a read-only command (kubectl logs --previous) as diagnosis guidance")
 	}
 }
 
-func TestCrashLoop_Undetermined_SenzaLastTerminationState(t *testing.T) {
+func TestCrashLoop_Undetermined_WithoutLastTerminationState(t *testing.T) {
 	pods := []corev1.Pod{podWith("app-1", "app-1-uid", corev1.PodRunning, corev1.ContainerStatus{
 		Name:  "app",
 		State: corev1.ContainerState{Waiting: ptrWaiting(crashLoopWaiting())},
-		// LastTerminationState.Terminated volutamente assente.
+		// LastTerminationState.Terminated deliberately absent.
 	})}
 	target := newTarget(t, pods, nil, nil)
 
 	res, err := diagnose.CrashLoop{}.Diagnose(t.Context(), target)
 	if err != nil {
-		t.Fatalf("Diagnose ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
 	}
 	if len(res.Findings) != 1 {
-		t.Fatalf("atteso 1 finding, got %d: %+v", len(res.Findings), res.Findings)
+		t.Fatalf("expected 1 finding, got %d: %+v", len(res.Findings), res.Findings)
 	}
 	f := res.Findings[0]
 	if f.CheckID != string(diagnose.CauseCrashLoopUndetermined) {
-		t.Errorf("CheckID = %q, atteso %q", f.CheckID, diagnose.CauseCrashLoopUndetermined)
+		t.Errorf("CheckID = %q, expected %q", f.CheckID, diagnose.CauseCrashLoopUndetermined)
 	}
 	if !f.Undetermined {
-		t.Error("atteso Undetermined=true quando l'evidenza non basta a distinguere la causa")
+		t.Error("expected Undetermined=true when evidence is insufficient to distinguish the cause")
 	}
 	if f.Severity != model.SeverityHigh {
-		t.Errorf("un rollout oggettivamente bloccato resta High anche se la causa e' non determinata, got severity=%v", f.Severity)
+		t.Errorf("an objectively blocked rollout remains High even if the cause is undetermined, got severity=%v", f.Severity)
 	}
 }
 
-func TestCrashLoop_NessunProblema_ContainerInEsecuzione(t *testing.T) {
+func TestCrashLoop_NoProblem_ContainerRunning(t *testing.T) {
 	pods := []corev1.Pod{podWith("app-1", "app-1-uid", corev1.PodRunning, corev1.ContainerStatus{
 		Name:  "app",
 		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
@@ -147,10 +147,10 @@ func TestCrashLoop_NessunProblema_ContainerInEsecuzione(t *testing.T) {
 
 	res, err := diagnose.CrashLoop{}.Diagnose(t.Context(), target)
 	if err != nil {
-		t.Fatalf("Diagnose ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
 	}
 	if len(res.Findings) != 0 {
-		t.Fatalf("un container in esecuzione normale non deve produrre finding, got %+v", res.Findings)
+		t.Fatalf("a normally running container must not produce findings, got %+v", res.Findings)
 	}
 }
 
