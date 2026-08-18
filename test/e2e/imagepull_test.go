@@ -25,11 +25,11 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/diagnose"
 )
 
-// TestWatchE2E_ImageTagInesistente verifica imagepull-tag-not-found: un
-// tag che non esiste su un repository reale e raggiungibile (Docker
-// Hub), cosi' il container runtime del nodo kind risponde "manifest
-// unknown" davvero, non un messaggio simulato.
-func TestWatchE2E_ImageTagInesistente(t *testing.T) {
+// TestWatchE2E_NonexistentImageTag verifies imagepull-tag-not-found: a
+// tag that does not exist in a real, reachable repository (Docker Hub),
+// so the kind node's container runtime actually returns "manifest
+// unknown", not a simulated message.
+func TestWatchE2E_NonexistentImageTag(t *testing.T) {
 	client := newE2EClient(t)
 	ns := newE2ENamespace(t, client)
 
@@ -44,10 +44,10 @@ func TestWatchE2E_ImageTagInesistente(t *testing.T) {
 	watchAndExpectCause(t, client, ns, d, diagnose.CauseImagePullTagNotFound, 2*time.Minute)
 }
 
-// TestWatchE2E_RegistryNonRaggiungibile verifica
-// imagepull-registry-unreachable: un hostname di registry che non
-// risolve via DNS, fallimento rapido e deterministico.
-func TestWatchE2E_RegistryNonRaggiungibile(t *testing.T) {
+// TestWatchE2E_UnreachableRegistry verifies
+// imagepull-registry-unreachable: a registry hostname that does not
+// resolve through DNS, producing a fast, deterministic failure.
+func TestWatchE2E_UnreachableRegistry(t *testing.T) {
 	client := newE2EClient(t)
 	ns := newE2ENamespace(t, client)
 
@@ -62,13 +62,13 @@ func TestWatchE2E_RegistryNonRaggiungibile(t *testing.T) {
 	watchAndExpectCause(t, client, ns, d, diagnose.CauseImagePullRegistryUnreachable, 2*time.Minute)
 }
 
-// TestWatchE2E_CredenzialiRegistryMancanti verifica
-// imagepull-credentials-missing: un repository privato/inesistente su
-// Docker Hub senza imagePullSecrets produce il messaggio classico "pull
-// access denied ... repository does not exist or may require 'docker
-// login'", che il pattern module classifica come credenziali mancanti
-// (non tag inesistente, vedi il commento in internal/diagnose/pattern).
-func TestWatchE2E_CredenzialiRegistryMancanti(t *testing.T) {
+// TestWatchE2E_MissingRegistryCredentials verifies
+// imagepull-credentials-missing: a private/nonexistent repository on
+// Docker Hub without imagePullSecrets produces the classic "pull access
+// denied ... repository does not exist or may require 'docker login'"
+// message, which the pattern module classifies as missing credentials
+// (not a nonexistent tag; see the comment in internal/diagnose/pattern).
+func TestWatchE2E_MissingRegistryCredentials(t *testing.T) {
 	client := newE2EClient(t)
 	ns := newE2ENamespace(t, client)
 

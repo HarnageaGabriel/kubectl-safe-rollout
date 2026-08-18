@@ -30,19 +30,19 @@ func newWatchCommand(configFlags *genericclioptions.ConfigFlags) *cobra.Command 
 	var outputFormat string
 	cmd := &cobra.Command{
 		Use:   "watch <kind>/<name>",
-		Short: "Osserva un rollout in corso e classifica la causa se fallisce",
+		Short: "Watch an ongoing rollout and classify the cause if it fails",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWatch(cmd, configFlags, args[0], outputFormat)
 		},
 	}
-	cmd.Flags().StringVar(&outputFormat, "output", "human", `formato di output: "human" o "json"`)
+	cmd.Flags().StringVar(&outputFormat, "output", "human", `output format: "human" or "json"`)
 	return cmd
 }
 
 func runWatch(cmd *cobra.Command, configFlags *genericclioptions.ConfigFlags, ref, outputFormat string) error {
 	if outputFormat != "human" && outputFormat != "json" {
-		return fmt.Errorf("--output non valido: %q (atteso human o json)", outputFormat)
+		return fmt.Errorf("invalid --output: %q (expected human or json)", outputFormat)
 	}
 
 	clients, err := kube.NewClients(configFlags)

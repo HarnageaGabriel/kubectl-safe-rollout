@@ -1,41 +1,38 @@
-# Convenzioni Go
+# Go conventions
 
-- **Modulo**: `github.com/HarnageaGabriel/kubectl-safe-rollout`. Import
-  path assoluti sempre da qui, mai relativi.
-- **`internal/` e' un confine architetturale, non solo una convenzione
-  Go**: `internal/check`, `internal/diagnose`, `internal/remediate`,
-  `internal/workload`, `internal/model` non importano `github.com/
-  spf13/cobra`, non chiamano `os.Exit`, non scrivono su stdout/stderr
-  direttamente. Solo `cmd/kubectl-safe_rollout/` e `internal/output/`
-  possono farlo: il confine e' pulito apposta, cosi' una futura
-  promozione a `pkg/` (per un Action o un admission controller) resta
-  un mechanical move, non un refactor.
-- **Interfacce sui client**, non tipi concreti: le funzioni che
-  parlano con il cluster accettano `kubernetes.Interface` /
-  `metricsv1beta1.MetricsV1beta1Interface`, mai `*kubernetes.Clientset`.
-  E' quello che rende `client-go/kubernetes/fake` utilizzabile nei test
-  senza wrapper aggiuntivi.
-- **Degradazione, non panico**: se una risorsa non e' accessibile
-  (RBAC insufficiente, metrics-server assente), la verifica restituisce
-  `check.Skip(id, motivo)`, non un errore che interrompe l'intera
-  esecuzione di `check`. Un errore da `Check.Run` e' riservato a bug
-  interni (es. costruzione di un selector fallita per un bug nostro),
-  non a condizioni attese del cluster.
-- **Parsing Event isolato**: tutto lo string matching su `Event.Message`
-  vive in `internal/diagnose/pattern`. I diagnoser usano prima campi
-  strutturati (`Reason`, `ExitCode`, `PVC.Status.Phase`) e ricadono su
-  `*-undetermined` se nessun pattern combacia.
-- **Nessun default silenzioso su valori che il brief richiede di
-  rendere visibili**: se un default Kubernetes viene applicato
-  esplicitamente nel codice (es. `Replicas` nil -> 1, `MaxUnavailable`
-  non impostato -> 25%), commentare perche', come in
+- **Module**: `github.com/HarnageaGabriel/kubectl-safe-rollout`. Always use
+  absolute import paths from here, never relative ones.
+- **`internal/` is an architectural boundary, not just a Go convention**:
+  `internal/check`, `internal/diagnose`, `internal/remediate`,
+  `internal/workload`, and `internal/model` do not import `github.com/
+  spf13/cobra`, call `os.Exit`, or write directly to stdout/stderr. Only
+  `cmd/kubectl-safe_rollout/` and `internal/output/` may do so: the boundary is
+  deliberately clean, so a future promotion to `pkg/` (for an Action or an
+  admission controller) remains a mechanical move, not a refactor.
+- **Interfaces for clients**, not concrete types: functions that communicate
+  with the cluster accept `kubernetes.Interface` /
+  `metricsv1beta1.MetricsV1beta1Interface`, never `*kubernetes.Clientset`.
+  This is what makes `client-go/kubernetes/fake` usable in tests without
+  additional wrappers.
+- **Degrade, do not panic**: if a resource is not accessible (insufficient
+  RBAC, metrics-server unavailable), the check returns
+  `check.Skip(id, reason)`, not an error that stops the entire `check` run. An
+  error from `Check.Run` is reserved for internal bugs (for example, building
+  a selector failed because of a bug in our code), not expected cluster
+  conditions.
+- **Isolated Event parsing**: all string matching on `Event.Message` lives in
+  `internal/diagnose/pattern`. Diagnosers use structured fields first
+  (`Reason`, `ExitCode`, `PVC.Status.Phase`) and fall back to
+  `*-undetermined` if no pattern matches.
+- **No silent defaults for values the brief requires to be visible**: if a
+  Kubernetes default is explicitly applied in code (for example, `Replicas`
+  nil -> 1, unset `MaxUnavailable` -> 25%), comment on why, as in
   [internal/workload/workload.go](../internal/workload/workload.go).
-- **Errori**: `fmt.Errorf("azione: %w", err)` con l'azione in italiano
-  minuscolo, coerente col resto dei messaggi utente (vedi
-  `rules/output.md`). Wrappare sempre, mai perdere l'errore originale.
-- **`gofmt` e `go vet` puliti prima di ogni commit**: la CI fallisce
-  altrimenti (vedi `.github/workflows/ci.yml`).
-- **Niente `pkg/` finche' non serve davvero**: non anticipare la
-  promozione a libreria pubblica spostando codice prematuramente. Il
-  vincolo di non importare `cobra` in `internal/` e' sufficiente a
-  tenersi pronti.
+- **Errors**: `fmt.Errorf("action: %w", err)` with the action in lowercase
+  English, consistent with the rest of the user-facing messages (see
+  `rules/output.md`). Always wrap; never lose the original error.
+- **Clean `gofmt` and `go vet` before every commit**: CI fails otherwise (see
+  `.github/workflows/ci.yml`).
+- **No `pkg/` until it is genuinely needed**: do not anticipate promotion to
+  a public library by moving code prematurely. The restriction against
+  importing `cobra` in `internal/` is enough to keep that option open.

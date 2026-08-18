@@ -26,14 +26,14 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/diagnose"
 )
 
-// TestWatchE2E_ProgressDeadlineExceeded verifica progress-deadline-
-// exceeded isolato dalle altre cause: il container parte e resta in
-// esecuzione (nessun CrashLoopBackOff, nessun problema di pull, nessuno
-// scheduling bloccato), ma la readinessProbe fallisce sempre, quindi il
-// pod non diventa mai Ready/Available. Con un progressDeadlineSeconds
-// breve, il controller del Deployment marca la condition Progressing
-// come ProgressDeadlineExceeded prima che qualunque altro Diagnoser
-// abbia qualcosa da segnalare.
+// TestWatchE2E_ProgressDeadlineExceeded verifies progress-deadline-
+// exceeded in isolation from the other causes: the container starts and
+// keeps running (no CrashLoopBackOff, no pull problem, no blocked
+// scheduling), but the readinessProbe always fails, so the pod never
+// becomes Ready/Available. With a short progressDeadlineSeconds, the
+// Deployment controller marks the Progressing condition as
+// ProgressDeadlineExceeded before any other Diagnoser has anything to
+// report.
 func TestWatchE2E_ProgressDeadlineExceeded(t *testing.T) {
 	client := newE2EClient(t)
 	ns := newE2ENamespace(t, client)

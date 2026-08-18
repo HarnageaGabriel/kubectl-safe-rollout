@@ -27,10 +27,10 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/diagnose"
 )
 
-// TestWatchE2E_CrashLoopExitApplicativo verifica la classificazione
-// crashloop-app-error: un container che esce subito con un exit code
-// applicativo, ne' OOMKilled ne' ucciso dalla liveness probe.
-func TestWatchE2E_CrashLoopExitApplicativo(t *testing.T) {
+// TestWatchE2E_CrashLoopApplicationExit verifies crashloop-app-error:
+// a container that exits immediately with an application exit code,
+// neither OOMKilled nor killed by the liveness probe.
+func TestWatchE2E_CrashLoopApplicationExit(t *testing.T) {
 	client := newE2EClient(t)
 	ns := newE2ENamespace(t, client)
 
@@ -46,9 +46,9 @@ func TestWatchE2E_CrashLoopExitApplicativo(t *testing.T) {
 	watchAndExpectCause(t, client, ns, d, diagnose.CauseCrashLoopAppError, 2*time.Minute)
 }
 
-// TestWatchE2E_CrashLoopOOMKilled verifica crashloop-oomkilled: un
-// container con un limite di memoria basso e un comando che alloca
-// memoria in modo crescente finche' il kernel non lo termina.
+// TestWatchE2E_CrashLoopOOMKilled verifies crashloop-oomkilled: a
+// container with a low memory limit and a command that allocates more
+// and more memory until the kernel terminates it.
 func TestWatchE2E_CrashLoopOOMKilled(t *testing.T) {
 	client := newE2EClient(t)
 	ns := newE2ENamespace(t, client)
@@ -70,11 +70,11 @@ func TestWatchE2E_CrashLoopOOMKilled(t *testing.T) {
 	watchAndExpectCause(t, client, ns, d, diagnose.CauseCrashLoopOOMKilled, 2*time.Minute)
 }
 
-// TestWatchE2E_CrashLoopLivenessProbe verifica crashloop-liveness-probe:
-// un container che parte e resta in esecuzione, ma la cui liveness
-// probe punta a un path che risponde sempre 404 con soglia di fallimento
-// bassa, cosi' il kubelet lo termina ripetutamente prima ancora che
-// possa crashare da solo.
+// TestWatchE2E_CrashLoopLivenessProbe verifies
+// crashloop-liveness-probe: a container that starts and keeps running,
+// but whose liveness probe points to a path that always returns 404 with
+// a low failure threshold, so the kubelet repeatedly terminates it
+// before it can crash on its own.
 func TestWatchE2E_CrashLoopLivenessProbe(t *testing.T) {
 	client := newE2EClient(t)
 	ns := newE2ENamespace(t, client)

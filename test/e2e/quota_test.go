@@ -27,11 +27,12 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/diagnose"
 )
 
-// TestWatchE2E_QuotaEsaurita verifica quota-exceeded: una ResourceQuota
-// che permette un solo pod nel namespace, un Deployment con 2 repliche
-// che la supera. Il secondo pod non arriva mai a esistere: l'admission
-// plugin rifiuta la creazione e il ReplicaSet riceve FailedCreate.
-func TestWatchE2E_QuotaEsaurita(t *testing.T) {
+// TestWatchE2E_ExhaustedQuota verifies quota-exceeded: a ResourceQuota
+// that allows only one pod in the namespace and a Deployment with 2
+// replicas that exceeds it. The second pod is never created: the
+// admission plugin rejects its creation and the ReplicaSet receives
+// FailedCreate.
+func TestWatchE2E_ExhaustedQuota(t *testing.T) {
 	client := newE2EClient(t)
 	ns := newE2ENamespace(t, client)
 
@@ -44,7 +45,7 @@ func TestWatchE2E_QuotaEsaurita(t *testing.T) {
 		},
 	}
 	if _, err := client.CoreV1().ResourceQuotas(ns).Create(t.Context(), quota, metav1.CreateOptions{}); err != nil {
-		t.Fatalf("creazione ResourceQuota: %v", err)
+		t.Fatalf("creating ResourceQuota: %v", err)
 	}
 
 	podSpec := corev1.PodSpec{

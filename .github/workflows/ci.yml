@@ -6,11 +6,11 @@ on:
   pull_request:
     branches: [main]
 
-# Soglia di copertura concordata (vedi rules/test.md): 75%, qualche punto
-# sotto la copertura reale al momento in cui e' stata fissata (80.0% su
-# internal/..., unica parte del codice sottoposta a test unitari — la
-# CLI in cmd/ e' wiring cobra, testata dagli scenari e2e quando saranno
-# disponibili). Alzare solo quando il nuovo codice la supera davvero.
+# Agreed coverage threshold (see rules/test.md): 75%, a few points below
+# actual coverage when it was set (80.0% on internal/..., the only part of the
+# code covered by unit tests — the CLI in cmd/ is cobra wiring, tested by e2e
+# scenarios when they are available). Raise it only when new code genuinely
+# exceeds it.
 env:
   COVERAGE_THRESHOLD: "75"
 
@@ -30,7 +30,7 @@ jobs:
         run: |
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then
-            echo "File non formattati con gofmt:"
+            echo "Files not formatted with gofmt:"
             echo "$unformatted"
             exit 1
           fi
@@ -56,24 +56,24 @@ jobs:
       - name: Build
         run: go build ./...
 
-      - name: Test (tutti i package)
+      - name: Test (all packages)
         run: go test ./...
 
-      - name: Copertura (solo internal/)
-        # Il gate di copertura misura solo internal/...: cmd/ e' wiring
-        # cobra, senza logica di dominio, e in Go 1.26+
-        # un package senza test file entra comunque nel profilo merged
-        # con 0% delle sue statement, il che abbasserebbe la soglia
-        # senza motivo se calcolata su ./... (misurato: 80% su
-        # internal/... contro 60% su ./... con lo stesso codice).
+      - name: Coverage (internal/ only)
+        # The coverage gate measures only internal/...: cmd/ is cobra wiring
+        # with no domain logic, and in Go 1.26+ a package without test files is
+        # still included in the merged profile with 0% of its statements,
+        # which would lower the threshold for no reason if calculated on ./...
+        # (measured: 80% on internal/... versus 60% on ./... with the same
+        # code).
         run: go test ./internal/... -coverprofile=coverage.out -covermode=atomic
 
-      - name: Verifica soglia di copertura
+      - name: Check coverage threshold
         run: |
           total=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
-          echo "Copertura totale: ${total}%  (soglia: ${COVERAGE_THRESHOLD}%)"
+          echo "Total coverage: ${total}%  (threshold: ${COVERAGE_THRESHOLD}%)"
           awk -v t="$total" -v th="$COVERAGE_THRESHOLD" 'BEGIN { exit (t+0 >= th+0) ? 0 : 1 }' \
-            || { echo "Copertura sotto la soglia minima di ${COVERAGE_THRESHOLD}%"; exit 1; }
+            || { echo "Coverage below the minimum threshold of ${COVERAGE_THRESHOLD}%"; exit 1; }
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4

@@ -14,12 +14,12 @@
 
 //go:build e2e
 
-// Package e2e_test contiene gli scenari end-to-end di `watch` contro un
-// cluster kind reale (criterio di qualita' del progetto: uno scenario
-// per ciascuna causa classificata). Isolato dal resto della suite con il
-// build tag "e2e" cosi' `go test ./...` (CI compresa) non richiede un
-// cluster: si esegue esplicitamente con `make test-e2e`, che presuppone
-// un cluster kind chiamato "safe-rollout" gia' attivo (vedi README).
+// Package e2e_test contains the end-to-end `watch` scenarios against a
+// real kind cluster (project quality criterion: one scenario for each
+// classified cause). It is isolated from the rest of the suite with the
+// "e2e" build tag so `go test ./...` (including CI) does not require a
+// cluster: run it explicitly with `make test-e2e`, which expects an
+// already running kind cluster named "safe-rollout" (see README).
 package e2e_test
 
 import (
@@ -40,16 +40,16 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/workload"
 )
 
-// defaultE2EContext e' il contesto kubeconfig atteso di convenzione in
-// questo repository (`kind create cluster --name safe-rollout`).
-// Sovrascrivibile con E2E_CONTEXT per chi usa un nome diverso.
+// defaultE2EContext is the conventional kubeconfig context expected in
+// this repository (`kind create cluster --name safe-rollout`). It can be
+// overridden with E2E_CONTEXT when using a different name.
 const defaultE2EContext = "kind-safe-rollout"
 
-// newE2EClient costruisce un client Kubernetes reale dal kubeconfig
-// dell'utente, sul contesto del cluster kind. Fallisce il test con un
-// messaggio esplicito (non uno skip silenzioso) se il contesto non
-// esiste: uno scenario e2e che non gira per un cluster mancante deve
-// essere visibile, non confuso con un successo.
+// newE2EClient builds a real Kubernetes client from the user's
+// kubeconfig, using the kind cluster context. It fails the test with an
+// explicit message (not a silent skip) if the context does not exist: an
+// e2e scenario that does not run because the cluster is missing must be
+// visible, not mistaken for a success.
 func newE2EClient(t *testing.T) kubernetes.Interface {
 	t.Helper()
 	ctxName := os.Getenv("E2E_CONTEXT")
@@ -60,25 +60,25 @@ func newE2EClient(t *testing.T) kubernetes.Interface {
 	overrides := &clientcmd.ConfigOverrides{CurrentContext: ctxName}
 	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, overrides).ClientConfig()
 	if err != nil {
-		t.Fatalf("configurazione per il contesto %q non disponibile: %v (serve un cluster kind: kind create cluster --name safe-rollout)", ctxName, err)
+		t.Fatalf("configuration for context %q is unavailable: %v (a kind cluster is required: kind create cluster --name safe-rollout)", ctxName, err)
 	}
 	client, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
-		t.Fatalf("creazione client Kubernetes: %v", err)
+		t.Fatalf("creating Kubernetes client: %v", err)
 	}
 	return client
 }
 
-// newE2ENamespace crea un namespace usa-e-getta per isolare lo scenario
-// e lo elimina a fine test, cosi' gli scenari possono girare in
-// parallelo o in sequenza senza interferire tra loro.
+// newE2ENamespace creates a disposable namespace to isolate the scenario
+// and deletes it at the end of the test, so scenarios can run in
+// parallel or sequentially without interfering with one another.
 func newE2ENamespace(t *testing.T, client kubernetes.Interface) string {
 	t.Helper()
 	ctx := context.Background()
 	name := fmt.Sprintf("e2e-%d-%d", time.Now().UnixNano(), rand.Intn(100000))
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
 	if _, err := client.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil {
-		t.Fatalf("creazione namespace %q: %v", name, err)
+		t.Fatalf("creating namespace %q: %v", name, err)
 	}
 	t.Cleanup(func() {
 		_ = client.CoreV1().Namespaces().Delete(context.Background(), name, metav1.DeleteOptions{})
@@ -86,10 +86,9 @@ func newE2ENamespace(t *testing.T, client kubernetes.Interface) string {
 	return name
 }
 
-// deployWorkload crea un Deployment a singolo container con le label di
-// selezione gia' coerenti tra Spec.Selector e Template, cosi' ogni
-// scenario deve solo descrivere il PodSpec che produce la causa da
-// classificare.
+// deployWorkload creates a single-container Deployment with matching
+// selector labels in Spec.Selector and Template, so each scenario only
+// needs to describe the PodSpec that produces the cause to classify.
 func deployWorkload(t *testing.T, client kubernetes.Interface, namespace, name string, replicas int32, podSpec corev1.PodSpec, mutate func(*appsv1.Deployment)) *appsv1.Deployment {
 	t.Helper()
 	labels := map[string]string{"app": name}
@@ -109,15 +108,15 @@ func deployWorkload(t *testing.T, client kubernetes.Interface, namespace, name s
 	}
 	created, err := client.AppsV1().Deployments(namespace).Create(context.Background(), d, metav1.CreateOptions{})
 	if err != nil {
-		t.Fatalf("creazione Deployment %s/%s: %v", namespace, name, err)
+		t.Fatalf("creating Deployment %s/%s: %v", namespace, name, err)
 	}
 	return created
 }
 
-// watchAndExpectCause esegue diagnose.Watch contro il cluster reale e
-// verifica che tra i Finding emersi ce ne sia almeno uno con la CauseID
-// attesa: e' la stessa funzione che alimenta `kubectl safe-rollout
-// watch`, non una scorciatoia di test.
+// watchAndExpectCause runs diagnose.Watch against the real cluster and
+// verifies that at least one resulting Finding has the expected CauseID:
+// this is the same function that powers `kubectl safe-rollout watch`,
+// not a test shortcut.
 func watchAndExpectCause(t *testing.T, client kubernetes.Interface, namespace string, d *appsv1.Deployment, causeID diagnose.CauseID, timeout time.Duration) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -129,10 +128,10 @@ func watchAndExpectCause(t *testing.T, client kubernetes.Interface, namespace st
 		Client:    client,
 	})
 	if err != nil {
-		t.Fatalf("Watch ha restituito un errore inatteso: %v", err)
+		t.Fatalf("Watch returned an unexpected error: %v", err)
 	}
 	if outcome.Succeeded {
-		t.Fatalf("Watch ha riportato successo, atteso il fallimento %q", causeID)
+		t.Fatalf("Watch reported success, expected failure %q", causeID)
 	}
 	for _, res := range outcome.Results {
 		for _, f := range res.Findings {
@@ -141,5 +140,5 @@ func watchAndExpectCause(t *testing.T, client kubernetes.Interface, namespace st
 			}
 		}
 	}
-	t.Fatalf("causa %q non trovata tra i Results: %+v", causeID, outcome.Results)
+	t.Fatalf("cause %q not found among Results: %+v", causeID, outcome.Results)
 }

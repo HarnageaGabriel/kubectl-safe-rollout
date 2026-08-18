@@ -24,13 +24,13 @@ func newRootCommand() *cobra.Command {
 
 	root := &cobra.Command{
 		Use:   "safe-rollout",
-		Short: "Riduce il tempo tra \"il deploy e' fallito\" e \"so perche' e come lo sistemo\"",
-		Long: `kubectl safe-rollout analizza un workload prima e durante un rollout per
-individuare le cause ricorrenti di rollout falliti (PodDisruptionBudget
-incoerenti, probe assenti o aggressive, risorse insufficienti, quota
-esaurita, immagini non tirabili) e propone una remediation concreta.
+		Short: "Shorten the time between \"the deployment failed\" and \"I know why and how to fix it\"",
+		Long: `kubectl safe-rollout analyzes a workload before and during a rollout to
+identify common causes of failed rollouts (inconsistent PodDisruptionBudgets,
+missing or aggressive probes, insufficient resources, exhausted quotas, and
+images that cannot be pulled) and suggests concrete remediation.
 
-Non modifica mai lo stato del cluster.`,
+It never modifies cluster state.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

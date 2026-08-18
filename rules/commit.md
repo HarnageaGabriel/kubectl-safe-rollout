@@ -1,31 +1,30 @@
-# Convenzioni di commit
+# Commit conventions
 
-Conventional Commits, come la maggior parte dell'ecosistema
-cloud-native con cui questo progetto vuole interagire (contributi,
-changelog automatico, eventuale futura integrazione con release-please
-o simili per le release krew).
+Conventional Commits, like much of the cloud-native ecosystem this project
+aims to interact with (contributions, automated changelogs, and possible
+future integration with release-please or similar tools for krew releases).
 
 ```
-<tipo>(<scope opzionale>): <descrizione breve in inglese, imperativo>
+<type>(<optional scope>): <short imperative description in English>
 
-<corpo opzionale: perche', non cosa — il diff mostra gia' cosa>
+<optional body: why, not what — the diff already shows what>
 ```
 
-Tipi usati in questo repo:
+Types used in this repository:
 
-- `feat` — nuova verifica in `check`, nuova classificazione in
-  `diagnose`, nuovo comando.
-- `fix` — correzione di una verifica esistente (falso positivo, falso
-  negativo, remediation sbagliata).
-- `test` — solo test, nessuna modifica alla logica.
+- `feat` — new check in `check`, new classification in `diagnose`, new
+  command.
+- `fix` — correction to an existing check (false positive, false negative,
+  incorrect remediation).
+- `test` — tests only, no logic changes.
 - `docs` — README, rules/, docs/.
-- `chore` — dipendenze, CI, scaffolding.
-- `refactor` — nessun cambio di comportamento osservabile.
+- `chore` — dependencies, CI, scaffolding.
+- `refactor` — no observable behavior change.
 
-Scope consigliati: il package toccato senza `internal/` (`check`,
+Recommended scopes: the affected package without `internal/` (`check`,
 `workload`, `output`, `kube`, `cmd`).
 
-Esempi:
+Examples:
 
 ```
 feat(check): add ResourceQuota headroom check
@@ -34,12 +33,11 @@ test(check): add Recreate case with exhausted PDB budget
 docs: document end-to-end test workflow
 ```
 
-Un fix su un falso positivo o falso negativo di una verifica **deve**
-menzionare nel corpo lo scenario concreto che lo ha esposto: e' quello
-che rende il commit utile a chi debugga la stessa classe di problema
-in futuro, non solo un changelog.
+A fix for a false positive or false negative in a check **must** mention in the
+body the concrete scenario that exposed it. This makes the commit useful to
+someone debugging the same class of problem in the future, not merely a
+changelog entry.
 
-Ogni commit deve includere il trailer `Signed-off-by`, aggiunto con
-`git commit -s`, in conformita' al Developer Certificate of Origin
-(DCO). La CI rifiuta le pull request che contengono commit senza
-sign-off.
+Every commit must include the `Signed-off-by` trailer, added with
+`git commit -s`, in accordance with the Developer Certificate of Origin (DCO).
+CI rejects pull requests containing commits without sign-off.

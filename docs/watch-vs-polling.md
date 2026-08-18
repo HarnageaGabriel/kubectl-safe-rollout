@@ -1,100 +1,96 @@
-# Decisione: Watch API, non polling
+# Decision: Watch API, not polling
 
-Decisione architetturale chiusa prima dell'implementazione di `watch`.
+Architectural decision finalized before implementing `watch`.
 
-## Decisione
+## Decision
 
-`watch` usa la Watch API Kubernetes per Pod e Deployment del workload.
-Parte da una `List` dei Pod e da un `Get` del Deployment, entrambi con
-`resourceVersion`, poi apre due `RetryWatcher`.
+`watch` uses the Kubernetes Watch API for the workload's Pods and
+Deployment. It starts with a `List` of the Pods and a `Get` of the
+Deployment, both with a `resourceVersion`, then opens two `RetryWatcher`s.
 
-Non usa polling a intervallo fisso.
+It does not use fixed-interval polling.
 
-## Motivazioni
+## Rationale
 
-- **Reattivita'**: l'apiserver notifica le transizioni appena avvengono.
-  Un intervallo di polling aggiungerebbe latenza e potrebbe perdere stati
-  brevi.
-- **Carico**: i watch inviano delta. Il polling ripeterebbe `List` anche
-  senza cambiamenti, costo inutile su cluster o namespace grandi.
-- **ProgressDeadlineExceeded**: viene osservato sul Deployment, non
-  inferito dai Pod. Il secondo stream evita di attendere un evento Pod
-  che potrebbe non arrivare quando cambia solo `Deployment.Status`.
-- **Scope limitato**: il selector restringe i Pod al workload; il field
-  selector restringe il Deployment al nome richiesto.
+- **Responsiveness**: the apiserver reports transitions as soon as they
+  happen. A polling interval would add latency and could miss brief states.
+- **Load**: watches send deltas. Polling would repeat `List` even when
+  nothing changes, an unnecessary cost on large clusters or namespaces.
+- **ProgressDeadlineExceeded**: it is observed on the Deployment, not
+  inferred from the Pods. The second stream avoids waiting for a Pod event
+  that might not arrive when only `Deployment.Status` changes.
+- **Limited scope**: the selector restricts Pods to the workload; the field
+  selector restricts the Deployment to the requested name.
 
-## Riconnessione
+## Reconnection
 
-`RetryWatcher` riapre lo stream dalla ultima `resourceVersion` per errori
-recuperabili, inclusi EOF, timeout e riavvio dell'apiserver. Non esegue
-una nuova List quando la resourceVersion e' scaduta: in caso HTTP 410
-termina lo stream con un evento Error. Il loop esterno intercetta quel
-caso, rifà List/Get e ricrea entrambi i watch da snapshot coerenti.
+`RetryWatcher` reopens the stream from the last `resourceVersion` for
+recoverable errors, including EOF, timeout, and an apiserver restart. It does
+not run a new List when the resourceVersion has expired: on HTTP 410 it ends
+the stream with an Error event. The outer loop catches that case, repeats
+List/Get, and recreates both watches from consistent snapshots.
 
-Errori non recuperabili, inclusi Forbidden e Unauthorized, vengono
-restituiti esplicitamente. Nessun fallback silenzioso a polling.
+Unrecoverable errors, including Forbidden and Unauthorized, are returned
+explicitly. There is no silent fallback to polling.
 
-## Perche' non SharedInformer
+## Why not SharedInformer
 
-`watch` vive per un singolo rollout. Non serve una cache condivisa,
-un indexer o un processo controller long-running. `RetryWatcher` piu'
-re-list esplicita su HTTP 410 forniscono la semantica necessaria con
-meno stato e meno superficie di errore.
+`watch` lives for a single rollout. It does not need a shared cache, an
+indexer, or a long-running controller process. `RetryWatcher` plus an explicit
+re-list on HTTP 410 provide the required semantics with less state and a
+smaller error surface.
 
-## Letture puntuali durante la diagnosi
+## Point-in-time reads during diagnosis
 
-Ogni evento Pod o Deployment causa una rivalutazione:
+Every Pod or Deployment event triggers a reevaluation:
 
-- `Get` del Deployment per successo e `ProgressDeadlineExceeded`;
-- `List` dei ReplicaSet posseduti, per eventi `FailedCreate` di quota;
-- `List` degli Event del namespace, correlati tramite UID;
-- `Get` delle sole PVC referenziate da Pod Pending;
-- log `--previous` limitati, solo per exit code applicativo.
+- `Get` of the Deployment for success and `ProgressDeadlineExceeded`;
+- `List` of owned ReplicaSets, for quota-related `FailedCreate` events;
+- `List` of namespace Events, correlated by UID;
+- `Get` of only the PVCs referenced by Pending Pods;
+- limited `--previous` logs, only for application exit codes.
 
-ReplicaSet ed Event non hanno stream separati nell'MVP. Questa scelta
-evita la correlazione di quattro stream indipendenti. Se misure su cluster
-grandi mostrano carico eccessivo, prima ottimizzazione sara' una cache
-locale degli Event o un watch filtrato, non polling.
+ReplicaSets and Events do not have separate streams in the MVP. This choice
+avoids correlating four independent streams. If measurements on large
+clusters show excessive load, the first optimization will be a local Event
+cache or a filtered watch, not polling.
 
-## Finestre temporali: stabilita' e grazia
+## Time windows: stability and grace
 
-Due meccanismi aggiunti dopo aver eseguito gli scenari e2e su kind
-(`test/e2e/`), entrambi bug reali emersi solo contro un apiserver vero,
-mai visibili con fake clientset:
+Two mechanisms added after running the e2e scenarios on kind (`test/e2e/`),
+both real bugs that surfaced only against a real apiserver and were never
+visible with the fake clientset:
 
-- **rolloutStabilityWindow (5s)**: un container senza `readinessProbe`
-  conta come Ready appena il kubelet lo porta Running, anche per un
-  istante prima di crashare. `RolloutComplete()` letto una sola volta
-  poteva quindi dichiarare successo su un rollout che un momento dopo
-  andava in `CrashLoopBackOff`. Ora la lettura "completo" deve restare
-  vera ininterrottamente per la finestra prima di essere un successo
-  definitivo.
-- **undeterminedGraceWindow (3s) + gracePollInterval (500ms)**: un Pod in
-  `ImagePullBackOff` puo' mostrare quello stato prima ancora che l'Event
-  `Reason=Failed` col messaggio dettagliato sia visibile via `List`.
-  Fermarsi al primo tick avrebbe riportato "non determinato" anche
-  quando la causa specifica stava per arrivare. Quando ogni Finding del
-  tick e' `Undetermined`, `watch` ripete `evaluateTick` (che rilegge
-  Deployment/ReplicaSet/Event) ogni `gracePollInterval` finche' non
-  emerge una causa determinata o scade `undeterminedGraceWindow` — a quel
-  punto "non determinato" e' l'esito onesto, non piu' una lettura
-  prematura.
+- **rolloutStabilityWindow (5s)**: a container without a `readinessProbe`
+  counts as Ready as soon as the kubelet makes it Running, even for an instant
+  before it crashes. Reading `RolloutComplete()` only once could therefore
+  declare success for a rollout that entered `CrashLoopBackOff` a moment
+  later. Now the "complete" reading must remain true continuously for the
+  duration of the window before success is final.
+- **undeterminedGraceWindow (3s) + gracePollInterval (500ms)**: a Pod in
+  `ImagePullBackOff` can show that state before the `Reason=Failed` Event with
+  the detailed message is visible through `List`. Stopping at the first tick
+  would have reported "undetermined" even when the specific cause was about
+  to arrive. When every Finding from the tick is `Undetermined`, `watch`
+  repeats `evaluateTick` (which rereads Deployment/ReplicaSet/Event) every
+  `gracePollInterval` until a determined cause emerges or
+  `undeterminedGraceWindow` expires. At that point, "undetermined" is the
+  honest outcome, no longer a premature reading.
 
-`gracePollInterval` e' l'unica eccezione dichiarata al principio
-push-driven di questo documento: attiva solo mentre una causa resta
-ambigua, mai oltre `undeterminedGraceWindow`. Non e' una deriva verso il
-polling come meccanismo primario — il trigger che porta `watch` a
-fermarsi resta comunque un evento reale (Pod, Deployment, o la causa che
-si affina), non un timer che decide da solo.
+`gracePollInterval` is the only declared exception to this document's
+push-driven principle: it is active only while a cause remains ambiguous,
+never beyond `undeterminedGraceWindow`. It is not a drift toward polling as
+the primary mechanism. The trigger that causes `watch` to stop remains a real
+event (Pod, Deployment, or the cause becoming more specific), not a timer
+deciding on its own.
 
-Entrambe le finestre sono override-abili per i test
-(`WatchTarget.StabilityWindow`, `WatchTarget.UndeterminedGraceWindow`):
-`cmd/kubectl-safe_rollout` non le imposta mai, quindi l'uso reale ottiene
-sempre i default di produzione.
+Both windows can be overridden for tests (`WatchTarget.StabilityWindow`,
+`WatchTarget.UndeterminedGraceWindow`): `cmd/kubectl-safe_rollout` never sets
+them, so real usage always gets the production defaults.
 
-## Limiti di verifica attuali
+## Current verification limits
 
-I fake clientset verificano transizioni Pod/Deployment, classificazione
-e wiring della Watch API. Non simulano fedelmente compaction etcd,
-riconnessioni TCP, HTTP 410 reale, carico elevato o varianti runtime dei
-messaggi Event. Questi casi richiedono cluster reali e test kind.
+The fake clientsets verify Pod/Deployment transitions, classification, and
+Watch API wiring. They do not faithfully simulate etcd compaction, TCP
+reconnections, real HTTP 410 responses, high load, or runtime variations in
+Event messages. These cases require real clusters and kind tests.
