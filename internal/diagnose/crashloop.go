@@ -17,6 +17,7 @@ package diagnose
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -140,8 +141,14 @@ func (CrashLoop) classifyOOMKilled(pod corev1.Pod, cs corev1.ContainerStatus, te
 func (CrashLoop) classifyAppError(ctx context.Context, target Target, pod corev1.Pod, cs corev1.ContainerStatus, term *corev1.ContainerStateTerminated, resource model.ResourceRef, base []string) model.Finding {
 	evidence := append(append([]string(nil), base...), fmt.Sprintf("exitCode=%d reason=%s", term.ExitCode, term.Reason))
 	if target.LogTailer != nil {
-		if tail, err := target.LogTailer.PreviousLogTail(ctx, pod.Namespace, pod.Name, cs.Name, 3); err == nil && tail != "" {
-			evidence = append(evidence, fmt.Sprintf("log --previous (last lines): %s", tail))
+		if tail, err := target.LogTailer.PreviousLogTail(ctx, pod.Namespace, pod.Name, cs.Name, 3); err == nil {
+			// The log tail keeps the newline of its last line, and the
+			// human renderer already writes one per evidence entry: without
+			// trimming, every crashloop finding grows a blank line in the
+			// middle of its evidence block.
+			if tail = strings.TrimRight(tail, "\r\n"); tail != "" {
+				evidence = append(evidence, fmt.Sprintf("log --previous (last lines): %s", tail))
+			}
 		}
 	}
 	return model.Finding{
