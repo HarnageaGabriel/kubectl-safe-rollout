@@ -1,41 +1,40 @@
-# Convenzioni di test
+# Test conventions
 
-- **Ogni verifica in `internal/check` ha test unitari con
-  `client-go/kubernetes/fake`**, non negoziabile (criterio di qualita'
-  del progetto). Nessuna verifica si merge senza.
-- **Package `_test` esterno** (`package check_test`, non `package
-  check`): i test devono usare l'API pubblica del package come farebbe
-  un chiamante reale (`cmd/kubectl-safe_rollout`), cosi' un refactor
-  interno che rompe l'ergonomia esterna si vede subito.
-- **Nomi dei test in italiano, descrittivi del comportamento atteso**:
-  `TestPDBConsistency_MaxUnavailableZero_High`, non `TestCase1`. Devono
-  restare leggibili come specifica quando l'implementazione cambia.
-- **Un test per ogni severita' emessa e uno per il percorso "nessun
-  finding"**: un check che ha solo test del caso positivo non prova che
-  sappia anche tacere quando va tutto bene (falsi positivi sono un
-  costo di credibilita' quanto i falsi negativi).
-- **Un test per la degradazione**: se un check consulta una risorsa che
-  puo' mancare (RBAC, metrics-server), simulare l'errore con un reactor
-  su `fake.Clientset` (`PrependReactor`) e verificare `Result.Skipped`,
-  non solo il percorso felice.
-- **Copertura minima**: soglia verificata in CI, vedi
-  `.github/workflows/ci.yml` per il valore corrente. La build fallisce
-  sotto soglia. Aggiornare la soglia solo verso l'alto, e solo quando il
-  nuovo codice la supera davvero (non abbassarla per far passare la CI).
-- **E2E su kind**: uno scenario per ciascuna causa classificata da
-  `watch` (criterio di qualita' del progetto), in `test/e2e/`. Isolati
-  dal resto della suite con il build tag `e2e`: non girano in `go test
-  ./...` ne' in CI (nessun cluster disponibile li), solo con `make
-  test-e2e` contro un cluster kind attivo (`make kind-up`). Tutti gli 11
-  scenari del set minimo passano su kind v0.32/Kubernetes v1.36.1. Ogni
-  scenario crea un namespace usa-e-getta e lo elimina a fine test
-  (`t.Cleanup`); usa
-  sempre riferimenti a immagini/registry reali e reindirizzabili (Docker
-  Hub, DNS che non risolve) per esercitare i messaggi di errore veri di
-  containerd/kubelet/scheduler, mai una simulazione.
-- **Diagnose**: ogni CauseID determinata e ogni fallback `*-undetermined`
-  richiedono fixture realistiche di Pod, ContainerStatus, Event,
-  ReplicaSet/PVC quando pertinenti, usando fake clientset.
-- **Watch loop**: testare separatamente eventi Pod e Deployment. Il
-  secondo e' necessario per `ProgressDeadlineExceeded`, che puo' cambiare
-  senza alcun evento Pod.
+- **Every check in `internal/check` has unit tests using
+  `client-go/kubernetes/fake`**, without exception (a project quality
+  criterion). No check is merged without them.
+- **External `_test` package** (`package check_test`, not `package check`):
+  tests must use the package's public API as a real caller
+  (`cmd/kubectl-safe_rollout`) would, so an internal refactor that breaks the
+  external ergonomics is immediately visible.
+- **Test names are descriptive English phrases**:
+  `TestPDBConsistency_MaxUnavailableZero_High`, not `TestCase1`. They must
+  remain readable as a specification when the implementation changes.
+- **One test for every emitted severity and one for the "no finding" path**:
+  a check with tests only for the positive case does not prove that it can
+  remain silent when everything is fine (false positives cost as much
+  credibility as false negatives).
+- **One test for degradation**: if a check queries a resource that may be
+  unavailable (RBAC, metrics-server), simulate the error with a reactor on
+  `fake.Clientset` (`PrependReactor`) and verify `Result.Skipped`, not only the
+  happy path.
+- **Minimum coverage**: the threshold is enforced in CI; see
+  `.github/workflows/ci.yml` for the current value. The build fails below the
+  threshold. Raise the threshold only, and only when new code genuinely
+  exceeds it (do not lower it to make CI pass).
+- **E2E on kind**: one scenario for each cause classified by `watch` (a project
+  quality criterion), in `test/e2e/`. They are isolated from the rest of the
+  suite with the `e2e` build tag: they do not run in `go test ./...` or in CI
+  (no cluster is available there), only with `make test-e2e` against an active
+  kind cluster (`make kind-up`). All 11 scenarios in the minimum set pass on
+  kind v0.32/Kubernetes v1.36.1. Each scenario creates a disposable namespace
+  and deletes it at the end of the test (`t.Cleanup`); always use real,
+  redirectable image/registry references (Docker Hub, non-resolving DNS) to
+  exercise real containerd/kubelet/scheduler error messages, never a
+  simulation.
+- **Diagnose**: every determined CauseID and every `*-undetermined` fallback
+  requires realistic Pod, ContainerStatus, Event, and ReplicaSet/PVC fixtures
+  where relevant, using the fake clientset.
+- **Watch loop**: test Pod and Deployment events separately. The latter is
+  required for `ProgressDeadlineExceeded`, which can change without any Pod
+  event.

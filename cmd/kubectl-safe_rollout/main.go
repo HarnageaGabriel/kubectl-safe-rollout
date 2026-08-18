@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Command kubectl-safe_rollout e' l'entrypoint del plugin krew
-// "safe-rollout". Il nome del binario segue la convenzione krew per i
-// comandi multi-parola (underscore al posto del trattino); l'help e i
-// messaggi lo presentano comunque come "kubectl safe-rollout".
+// Command kubectl-safe_rollout is the entry point for the krew plugin
+// "safe-rollout". The binary name follows the krew convention for
+// multi-word commands (underscore instead of hyphen); help and messages
+// still present it as "kubectl safe-rollout".
 package main
 
 import (
@@ -24,12 +24,12 @@ import (
 	"os"
 )
 
-// errHighSeverity e' un errore sentinella: segnala a main che deve
-// uscire con codice non zero perche' sono stati trovati finding di
-// severita' alta, non perche' l'esecuzione e' fallita. La distinzione
-// conta perche' in quel caso l'output (gia' stampato dal comando) e' il
-// messaggio, e ripeterlo come "errore" su stderr sarebbe fuorviante.
-var errHighSeverity = errors.New("trovati finding di severita' alta")
+// errHighSeverity is a sentinel error: it tells main to exit with a
+// non-zero code because high-severity findings were found, not because
+// execution failed. The distinction matters because in that case the
+// output (already printed by the command) is the message, and repeating
+// it as an "error" on stderr would be misleading.
+var errHighSeverity = errors.New("high-severity findings found")
 
 func main() {
 	err := newRootCommand().Execute()

@@ -26,10 +26,10 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/output"
 )
 
-// registeredChecks elenca le verifiche eseguite da `check`. E' l'unico
-// punto da toccare per aggiungere una nuova verifica al comando: ogni
-// Check si occupa gia' da sola di degradare (Result.Skipped) quando le
-// serve una risorsa non disponibile.
+// registeredChecks lists the checks run by `check`. It is the only place
+// to update when adding a new check to the command: each Check already
+// degrades on its own (Result.Skipped) when a resource it needs is
+// unavailable.
 func registeredChecks() []check.Check {
 	return []check.Check{
 		check.PDBConsistency{},
@@ -46,21 +46,21 @@ func newCheckCommand(configFlags *genericclioptions.ConfigFlags) *cobra.Command 
 
 	cmd := &cobra.Command{
 		Use:   "check <kind>/<name>",
-		Short: "Analisi pre-flight statica di un workload prima del rollout",
+		Short: "Run a static pre-flight analysis of a workload before a rollout",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCheck(cmd, configFlags, args[0], outputFormat)
 		},
 	}
 
-	cmd.Flags().StringVar(&outputFormat, "output", "human", `formato di output: "human" o "json"`)
+	cmd.Flags().StringVar(&outputFormat, "output", "human", `output format: "human" or "json"`)
 
 	return cmd
 }
 
 func runCheck(cmd *cobra.Command, configFlags *genericclioptions.ConfigFlags, ref, outputFormat string) error {
 	if outputFormat != "human" && outputFormat != "json" {
-		return fmt.Errorf("--output non valido: %q (atteso human o json)", outputFormat)
+		return fmt.Errorf("invalid --output: %q (expected human or json)", outputFormat)
 	}
 
 	ctx := cmd.Context()
@@ -94,7 +94,7 @@ func runCheck(cmd *cobra.Command, configFlags *genericclioptions.ConfigFlags, re
 	for _, c := range registeredChecks() {
 		res, err := c.Run(ctx, target)
 		if err != nil {
-			return fmt.Errorf("verifica %s: %w", c.ID(), err)
+			return fmt.Errorf("check %s: %w", c.ID(), err)
 		}
 		groups = append(groups, output.Group{
 			ID:         res.CheckID,

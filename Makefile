@@ -35,17 +35,16 @@ lint: check-fmt vet
 tidy:
 	go mod tidy
 
-# kind-up crea il cluster usato dagli scenari e2e, se non esiste gia'.
+# kind-up creates the cluster used by e2e scenarios, if it does not exist.
 kind-up:
 	@kind get clusters 2>/dev/null | grep -qx "$(KIND_CLUSTER)" || kind create cluster --name $(KIND_CLUSTER) --wait 120s
 
 kind-down:
 	kind delete cluster --name $(KIND_CLUSTER)
 
-# test-e2e richiede un cluster kind attivo (make kind-up) e Docker in
-# esecuzione: crea ed elimina risorse reali sul contesto
-# kind-safe-rollout, vedi test/e2e/e2e_test.go. Isolato dal resto della
-# suite dal build tag "e2e", per questo non e' incluso in `make test`
-# ne' in CI (rules/test.md).
+# test-e2e requires an active kind cluster (make kind-up) and Docker running:
+# it creates and deletes real resources in the kind-safe-rollout context; see
+# test/e2e/e2e_test.go. The "e2e" build tag isolates it from the rest of the
+# suite, so it is not included in `make test` or CI (rules/test.md).
 test-e2e:
 	go test -tags e2e ./test/e2e/... -v -timeout 20m

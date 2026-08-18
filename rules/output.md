@@ -1,30 +1,29 @@
-# Convenzioni di output
+# Output conventions
 
-- **Due formati, un solo Report**: check e diagnose convertono i propri
-  Result in `output.Group`; `internal/output.Report` alimenta entrambi i
-  renderer (`RenderHuman`, `RenderJSON`). Nessun renderer separato per
-  `watch`.
-- **Umano di default, `--output json` esplicito**: mai il contrario. Chi
-  lancia il comando a mano in un incidente non deve leggere JSON.
-- **Ordine per severita' decrescente**: sempre High prima di Low, in
-  entrambi i formati. Chi guarda sotto pressione legge le prime righe.
-- **`Skipped` e' visibile quanto un finding**, non un dettaglio silente:
-  l'output umano lo stampa come riga `SKIP` con il motivo, mai lo
-  omette. Un check che tace perche' non ha potuto valutare non deve
-  sembrare un check che ha valutato e trovato tutto ok.
-- **Nessun finding senza remediation concreta o senza
-  `ContextDependent: true` dichiarato esplicitamente** (criterio di
-  qualita' del progetto, vedi `internal/model/finding.go`). Non esiste
-  un terzo caso in cui si stampa un comando "a titolo indicativo" senza
-  il flag.
-- **Incertezza esplicita**: evidenza insufficiente usa una CauseID
-  `*-undetermined`, `Finding.Undetermined=true` ed elenca quanto osservato.
-  Mai scegliere la causa piu' probabile.
-- **Exit code**: non zero se e solo se esiste almeno un finding
-  `SeverityHigh` nel report finale, indipendentemente dal formato di
-  output. E' quello che rende `check` utilizzabile come gate in CI/CD.
-  Severity Medium/Low non alterano l'exit code: servono a dare contesto,
-  non a bloccare la pipeline.
-- **Messaggi in italiano**, coerenti con il resto del progetto (README,
-  commit, documentazione). Se in futuro serve i18n, e' un cambio deliberato
-  con una issue dedicata, non una deriva graduale bilingue.
+- **Two formats, one Report**: check and diagnose convert their Results into
+  `output.Group`; `internal/output.Report` feeds both renderers (`RenderHuman`,
+  `RenderJSON`). There is no separate renderer for `watch`.
+- **Human by default, explicit `--output json`**: never the other way around.
+  Someone running the command manually during an incident should not have to
+  read JSON.
+- **Descending severity order**: always High before Low, in both formats.
+  Someone reading under pressure sees the first lines first.
+- **`Skipped` is as visible as a finding**, not a silent detail: human output
+  prints it as a `SKIP` line with the reason and never omits it. A check that
+  is silent because it could not evaluate must not look like a check that
+  evaluated and found everything fine.
+- **Every finding has either concrete remediation or explicitly declared
+  `ContextDependent: true`** (a project quality criterion; see
+  `internal/model/finding.go`). There is no third case where a command is
+  printed "for reference" without the flag.
+- **Explicit uncertainty**: insufficient evidence uses a
+  `*-undetermined` CauseID, sets `Finding.Undetermined=true`, and lists what was
+  observed. Never choose the most likely cause.
+- **Exit code**: non-zero if and only if the final report contains at least one
+  `SeverityHigh` finding, regardless of output format. This makes `check`
+  usable as a CI/CD gate. Medium/Low severity does not change the exit code: it
+  provides context, not a reason to block the pipeline.
+- **Messages are in English**, because the plugin is published to the krew
+  index and read by an international audience. Any future language change or
+  internationalization must be a deliberate decision with a dedicated issue,
+  not gradual multilingual drift.

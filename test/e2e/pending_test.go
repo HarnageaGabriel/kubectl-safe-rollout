@@ -27,11 +27,11 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/diagnose"
 )
 
-// TestWatchE2E_RisorseInsufficienti verifica
-// pending-insufficient-resources: una richiesta di CPU molto piu' grande
-// di quella disponibile sull'unico nodo kind, lo scheduler rifiuta
-// subito con FailedScheduling.
-func TestWatchE2E_RisorseInsufficienti(t *testing.T) {
+// TestWatchE2E_InsufficientResources verifies
+// pending-insufficient-resources: a CPU request much larger than what is
+// available on the single kind node, so the scheduler immediately
+// rejects it with FailedScheduling.
+func TestWatchE2E_InsufficientResources(t *testing.T) {
 	client := newE2EClient(t)
 	ns := newE2ENamespace(t, client)
 
@@ -52,10 +52,10 @@ func TestWatchE2E_RisorseInsufficienti(t *testing.T) {
 	watchAndExpectCause(t, client, ns, d, diagnose.CausePendingInsufficientResources, 2*time.Minute)
 }
 
-// TestWatchE2E_VincoliScheduling verifica
-// pending-scheduling-constraints: un nodeSelector che non corrisponde a
-// nessun nodo del cluster kind (a nodo singolo).
-func TestWatchE2E_VincoliScheduling(t *testing.T) {
+// TestWatchE2E_SchedulingConstraints verifies
+// pending-scheduling-constraints: a nodeSelector that does not match any
+// node in the single-node kind cluster.
+func TestWatchE2E_SchedulingConstraints(t *testing.T) {
 	client := newE2EClient(t)
 	ns := newE2ENamespace(t, client)
 
@@ -72,10 +72,10 @@ func TestWatchE2E_VincoliScheduling(t *testing.T) {
 	watchAndExpectCause(t, client, ns, d, diagnose.CausePendingSchedulingConstraints, 2*time.Minute)
 }
 
-// TestWatchE2E_PVCNonBindabile verifica pending-unbound-pvc: una
-// PersistentVolumeClaim con uno storageClassName inesistente non trova
-// mai un provisioner e resta Pending indefinitamente.
-func TestWatchE2E_PVCNonBindabile(t *testing.T) {
+// TestWatchE2E_UnboundPVC verifies pending-unbound-pvc: a
+// PersistentVolumeClaim with a nonexistent storageClassName never finds
+// a provisioner and remains Pending indefinitely.
+func TestWatchE2E_UnboundPVC(t *testing.T) {
 	client := newE2EClient(t)
 	ns := newE2ENamespace(t, client)
 
@@ -91,7 +91,7 @@ func TestWatchE2E_PVCNonBindabile(t *testing.T) {
 		},
 	}
 	if _, err := client.CoreV1().PersistentVolumeClaims(ns).Create(t.Context(), pvc, metav1.CreateOptions{}); err != nil {
-		t.Fatalf("creazione PersistentVolumeClaim: %v", err)
+		t.Fatalf("creating PersistentVolumeClaim: %v", err)
 	}
 
 	podSpec := corev1.PodSpec{

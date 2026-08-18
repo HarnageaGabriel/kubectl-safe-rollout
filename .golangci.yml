@@ -16,10 +16,10 @@ linters:
         - name: exported
           disabled: false
     goheader:
-      # Applica l'header Apache 2.0 uniformemente a ogni file .go (vedi
-      # rules/license.md sul perche' e' una decisione non parziale). L'anno
-      # e' un pattern, non un letterale: un file nuovo scritto in un anno
-      # successivo resta valido senza dover toccare questa config.
+      # Apply the Apache 2.0 header uniformly to every .go file (see
+      # rules/license.md for why this is not a partial decision). The year is
+      # a pattern, not a literal: a new file written in a later year remains
+      # valid without changing this configuration.
       template: |-
         Copyright {{ YEAR }} Gabriel Harnagea
 
