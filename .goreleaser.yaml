@@ -1,0 +1,75 @@
+version: 2
+
+project_name: kubectl-safe-rollout
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: kubectl-safe_rollout
+    main: ./cmd/kubectl-safe_rollout
+    binary: kubectl-safe_rollout
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      # krew has no meaningful user base there and shipping an untested artifact is worse than not shipping it.
+      - goos: windows
+        goarch: arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - name_template: kubectl-safe_rollout_{{ .Tag }}_{{ .Os }}_{{ .Arch }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - ^chore
+      - ^test
+      - ^refactor
+      - ^Merge
+  groups:
+    - title: Features
+      regexp: ^feat
+      order: 0
+    - title: Bug fixes
+      regexp: ^fix
+      order: 1
+    - title: Documentation
+      regexp: ^docs
+      order: 2
+    - title: Other
+      order: 999
+
+release:
+  draft: false
+  prerelease: auto
+  footer: |
+    See the [krew installation instructions](https://github.com/HarnageaGabriel/kubectl-safe-rollout#installation) in the README.
