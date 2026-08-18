@@ -39,6 +39,7 @@ It never modifies cluster state.`,
 
 	root.AddCommand(newCheckCommand(configFlags))
 	root.AddCommand(newWatchCommand(configFlags))
+	root.AddCommand(newVersionCommand())
 
 	return root
 }
