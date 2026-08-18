@@ -68,6 +68,8 @@ git commit -s
 
 This sign-off follows the [Developer Certificate of Origin](https://developercertificate.org/) and certifies that you have the right to submit the contribution under the project license. CI rejects pull requests containing unsigned commits.
 
+Commits authored by a bot are exempt. The certificate is a statement by a person about code they are contributing, and an automated dependency bump makes no such claim; requiring it would only make those pull requests permanently unmergeable.
+
 If the last commit is missing its sign-off:
 
 ```shell
