@@ -1,4 +1,4 @@
-.PHONY: build test test-verbose cover lint fmt vet check-fmt tidy kind-up kind-down test-e2e
+.PHONY: build test test-verbose cover lint fmt vet check-fmt tidy release-check release-snapshot kind-up kind-down test-e2e
 
 BINARY := kubectl-safe_rollout
 KIND_CLUSTER := safe-rollout
@@ -34,6 +34,14 @@ lint: check-fmt vet
 
 tidy:
 	go mod tidy
+
+# Real releases are produced only by pushing a v* tag. These targets catch a
+# broken release configuration before the tag is pushed, while it is cheap to fix.
+release-check:
+	goreleaser check
+
+release-snapshot:
+	goreleaser release --snapshot --clean
 
 # kind-up creates the cluster used by e2e scenarios, if it does not exist.
 kind-up:

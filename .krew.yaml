@@ -1,0 +1,45 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: safe-rollout
+spec:
+  version: {{ .TagName }}
+  homepage: https://github.com/HarnageaGabriel/kubectl-safe-rollout
+  shortDescription: Explain why a rollout failed or stalled
+  description: |
+    Use check for pre-flight analysis of a live workload and its namespace.
+    Use watch to observe a rollout and classify its failure cause. The tool
+    never modifies cluster state. Classification is deterministic; ambiguous
+    evidence is reported as an explicit *-undetermined cause with the observed
+    evidence, rather than as a guess presented as certain.
+  platforms:
+    - selector:
+        matchLabels:
+          os: linux
+          arch: amd64
+      {{addURIAndSha "https://github.com/HarnageaGabriel/kubectl-safe-rollout/releases/download/{{ .TagName }}/kubectl-safe_rollout_{{ .TagName }}_linux_amd64.tar.gz" .TagName }}
+      bin: kubectl-safe_rollout
+    - selector:
+        matchLabels:
+          os: linux
+          arch: arm64
+      {{addURIAndSha "https://github.com/HarnageaGabriel/kubectl-safe-rollout/releases/download/{{ .TagName }}/kubectl-safe_rollout_{{ .TagName }}_linux_arm64.tar.gz" .TagName }}
+      bin: kubectl-safe_rollout
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: amd64
+      {{addURIAndSha "https://github.com/HarnageaGabriel/kubectl-safe-rollout/releases/download/{{ .TagName }}/kubectl-safe_rollout_{{ .TagName }}_darwin_amd64.tar.gz" .TagName }}
+      bin: kubectl-safe_rollout
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: arm64
+      {{addURIAndSha "https://github.com/HarnageaGabriel/kubectl-safe-rollout/releases/download/{{ .TagName }}/kubectl-safe_rollout_{{ .TagName }}_darwin_arm64.tar.gz" .TagName }}
+      bin: kubectl-safe_rollout
+    - selector:
+        matchLabels:
+          os: windows
+          arch: amd64
+      {{addURIAndSha "https://github.com/HarnageaGabriel/kubectl-safe-rollout/releases/download/{{ .TagName }}/kubectl-safe_rollout_{{ .TagName }}_windows_amd64.zip" .TagName }}
+      bin: kubectl-safe_rollout.exe
