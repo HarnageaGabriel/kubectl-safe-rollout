@@ -20,7 +20,7 @@ package diagnose
 // cause, e.g. "crashloop-oomkilled"), so consumers of the JSON output can
 // gate in CI on a single cause rather than the entire category.
 //
-// Every category (crashloop, imagepull, pending) has its own
+// Every category whose observed signal can have multiple causes has its own
 // "-undetermined" variant: it is the cause a Diagnoser reports when the
 // available evidence confirms that the rollout is blocked but is not
 // enough to distinguish among the category's known causes. There is no
@@ -49,6 +49,23 @@ const (
 	// does not allow choosing among the three causes above.
 	CauseCrashLoopUndetermined CauseID = "crashloop-undetermined"
 
+	// CauseConfigErrorMissingConfigMap means the kubelet cannot build the
+	// container configuration because its Waiting.Message names a missing
+	// ConfigMap while Waiting.Reason is CreateContainerConfigError.
+	CauseConfigErrorMissingConfigMap CauseID = "configerror-missing-configmap"
+	// CauseConfigErrorMissingSecret means the kubelet cannot build the
+	// container configuration because its Waiting.Message names a missing
+	// Secret while Waiting.Reason is CreateContainerConfigError.
+	CauseConfigErrorMissingSecret CauseID = "configerror-missing-secret"
+	// CauseConfigErrorUndetermined means Waiting.Reason confirms a
+	// CreateContainerConfigError but Waiting.Message names no recognized
+	// missing ConfigMap or Secret.
+	CauseConfigErrorUndetermined CauseID = "configerror-undetermined"
+
+	// CauseImagePullInvalidReference means Waiting.Reason is
+	// InvalidImageName: the image reference is malformed and no registry was
+	// contacted.
+	CauseImagePullInvalidReference CauseID = "imagepull-invalid-reference"
 	// CauseImagePullTagNotFound means the requested tag or digest does not
 	// exist in the registry.
 	CauseImagePullTagNotFound CauseID = "imagepull-tag-not-found"
@@ -63,6 +80,29 @@ const (
 	// ImagePullBackOff/ErrImagePull but the Failed event message matches no
 	// known pattern (unexpected runtime or message format).
 	CauseImagePullUndetermined CauseID = "imagepull-undetermined"
+
+	// CauseVolumeMountMissingSecret means a FailedMount event names a Secret
+	// that does not exist in the Pod namespace.
+	CauseVolumeMountMissingSecret CauseID = "volumemount-missing-secret"
+	// CauseVolumeMountMissingConfigMap means a FailedMount event names a
+	// ConfigMap that does not exist in the Pod namespace.
+	CauseVolumeMountMissingConfigMap CauseID = "volumemount-missing-configmap"
+	// CauseVolumeMountUndetermined means a FailedMount event confirms the
+	// volume setup failure but its message names no recognized missing Secret
+	// or ConfigMap.
+	CauseVolumeMountUndetermined CauseID = "volumemount-undetermined"
+
+	// CauseInitContainerAppError means an init container repeatedly exits
+	// non-zero for a reason other than OOMKilled. Structured signal: a
+	// non-zero Terminated.ExitCode after at least one restart.
+	CauseInitContainerAppError CauseID = "initcontainer-app-error"
+	// CauseInitContainerOOMKilled means an init container is terminated with
+	// structured Reason OOMKilled after exceeding its memory limit.
+	CauseInitContainerOOMKilled CauseID = "initcontainer-oomkilled"
+	// CauseInitContainerUndetermined means an init container is in
+	// CrashLoopBackOff but its termination state does not identify OOMKilled
+	// or a non-zero application exit.
+	CauseInitContainerUndetermined CauseID = "initcontainer-undetermined"
 
 	// CausePendingInsufficientResources means no node has enough CPU,
 	// memory, or ephemeral storage for scheduling.

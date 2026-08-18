@@ -29,7 +29,23 @@
 // cause, never choose by guessing.
 package pattern
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
+
+var missingConfigObjectPattern = regexp.MustCompile(`(?i)\b(configmap|secret)\s+"([^"]+)"\s+not found\b`)
+
+// MissingConfigObject extracts a missing ConfigMap or Secret named in a
+// kubelet message. Kubernetes exposes the containing failure category as a
+// structured Reason, but the referenced object exists only in free text.
+func MissingConfigObject(message string) (kind, name string, ok bool) {
+	match := missingConfigObjectPattern.FindStringSubmatch(message)
+	if match == nil {
+		return "", "", false
+	}
+	return strings.ToLower(match[1]), match[2], true
+}
 
 // ImagePullFailure classifies the message of a Reason=="Failed" event
 // generated while pulling an image (typically alongside a container in

@@ -15,6 +15,7 @@
 package diagnose_test
 
 import (
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -53,6 +54,13 @@ func TestProgressDeadline_Exceeded(t *testing.T) {
 	}
 	if res.Findings[0].Undetermined {
 		t.Error("the ProgressDeadlineExceeded condition is already the cause: it must not be Undetermined")
+	}
+	remediation := res.Findings[0].Remediation
+	if !strings.Contains(remediation.Summary, "if none reported a cause") || !strings.Contains(remediation.Summary, "kubectl rollout undo") || !remediation.ContextDependent {
+		t.Fatalf("remediation must explain unclassified causes, retain rollback guidance, and remain context-dependent: %+v", remediation)
+	}
+	if strings.Contains(remediation.Summary, "CrashLoopBackOff") || strings.Contains(remediation.Summary, "ImagePullBackOff") || strings.Contains(remediation.Summary, "Pending") {
+		t.Fatalf("remediation must not enumerate a stale subset of diagnosers: %q", remediation.Summary)
 	}
 }
 

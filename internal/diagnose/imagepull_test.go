@@ -15,12 +15,41 @@
 package diagnose_test
 
 import (
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/diagnose"
 )
+
+func TestImagePull_InvalidReference(t *testing.T) {
+	message := `Failed to apply default image tag "BUSYBOX:Bad_Tag!!": couldn't parse image name "BUSYBOX:Bad_Tag!!": invalid reference format: repository name (library/BUSYBOX) must be lowercase`
+	pods := []corev1.Pod{podWith("app-1", "app-1-uid", corev1.PodPending, corev1.ContainerStatus{
+		Name:  "app",
+		Image: "BUSYBOX:Bad_Tag!!",
+		State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{
+			Reason:  "InvalidImageName",
+			Message: message,
+		}},
+	})}
+	target := newTarget(t, pods, nil, nil)
+
+	res, err := diagnose.ImagePull{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if len(res.Findings) != 1 || res.Findings[0].CheckID != string(diagnose.CauseImagePullInvalidReference) {
+		t.Fatalf("expected 1 finding %q, got %+v", diagnose.CauseImagePullInvalidReference, res.Findings)
+	}
+	f := res.Findings[0]
+	if !strings.Contains(strings.Join(f.Evidence, "\n"), message) {
+		t.Fatalf("malformed image reference message must remain in evidence, got %+v", f.Evidence)
+	}
+	if !strings.Contains(f.Remediation.Summary, "no registry was contacted") || !strings.Contains(f.Remediation.Summary, "no credential or network problem is involved") || !strings.Contains(f.Remediation.Summary, "imagePullSecret cannot help") {
+		t.Fatalf("invalid-reference remediation must exclude registry and credential fixes, got %q", f.Remediation.Summary)
+	}
+}
 
 func imagePullWaiting(reason string) *corev1.ContainerStateWaiting {
 	return &corev1.ContainerStateWaiting{Reason: reason}
