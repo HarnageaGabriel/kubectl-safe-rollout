@@ -19,9 +19,9 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -44,7 +44,7 @@ jobs:
       # anything with "the Go language version used to build golangci-lint is
       # lower than the targeted Go version". It also cannot read the
       # `version: "2"` schema in .golangci.yml.
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
 
@@ -52,7 +52,7 @@ jobs:
       # type-checks them. Linting them separately is what keeps a broken e2e
       # file from being discovered only when someone has a cluster to run it.
       - name: golangci-lint (e2e build tag)
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
           args: --build-tags e2e
@@ -61,9 +61,9 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -91,7 +91,7 @@ jobs:
             || { echo "Coverage below the minimum threshold of ${COVERAGE_THRESHOLD}%"; exit 1; }
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.out
@@ -101,7 +101,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
