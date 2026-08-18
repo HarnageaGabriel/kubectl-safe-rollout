@@ -104,6 +104,15 @@ const (
 	// or a non-zero application exit.
 	CauseInitContainerUndetermined CauseID = "initcontainer-undetermined"
 
+	// CauseReadinessProbeFailing means a container remains running but not
+	// ready after the rollout exceeds its progress deadline, with an
+	// Unhealthy event confirming repeated readiness probe failures.
+	CauseReadinessProbeFailing CauseID = "readiness-probe-failing"
+	// CauseReadinessUndetermined means a container remains running but not
+	// ready after the rollout exceeds its progress deadline, but no
+	// Unhealthy readiness-probe event was observed to explain why.
+	CauseReadinessUndetermined CauseID = "readiness-undetermined"
+
 	// CausePendingInsufficientResources means no node has enough CPU,
 	// memory, or ephemeral storage for scheduling.
 	CausePendingInsufficientResources CauseID = "pending-insufficient-resources"

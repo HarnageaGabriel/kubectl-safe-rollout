@@ -114,6 +114,7 @@ func registeredDiagnosers() []Diagnoser {
 		ConfigError{},
 		VolumeMount{},
 		InitContainer{},
+		Readiness{},
 		Pending{},
 		Quota{},
 		ProgressDeadline{},

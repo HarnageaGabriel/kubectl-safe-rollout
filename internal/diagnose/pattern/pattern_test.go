@@ -117,6 +117,24 @@ func TestLivenessKilling_DifferentContainer(t *testing.T) {
 	}
 }
 
+func TestReadinessFailure_RealExecProbeMessage(t *testing.T) {
+	if !pattern.ReadinessFailure("Unhealthy", "Readiness probe failed: ") {
+		t.Fatal("expected a match for the real empty-output exec readiness probe message")
+	}
+}
+
+func TestReadinessFailure_RealHTTPProbeMessage(t *testing.T) {
+	if !pattern.ReadinessFailure("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 500") {
+		t.Fatal("expected a match for the real HTTP readiness probe message")
+	}
+}
+
+func TestReadinessFailure_LivenessProbeDoesNotMatch(t *testing.T) {
+	if pattern.ReadinessFailure("Unhealthy", "Liveness probe failed: HTTP probe failed with statuscode: 500") {
+		t.Fatal("Reason=Unhealthy alone must not classify a liveness failure as readiness")
+	}
+}
+
 func TestFailedScheduling_InsufficientResources(t *testing.T) {
 	cause, ok := pattern.FailedScheduling("0/5 nodes are available: 5 Insufficient cpu.")
 	if !ok || cause != "insufficient-resources" {
