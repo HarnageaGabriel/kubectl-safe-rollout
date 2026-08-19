@@ -27,7 +27,7 @@
   suite with the `e2e` build tag: they do not run in `go test ./...` or in CI
   (no cluster is available there), only with `make test-e2e` against an active
   kind cluster (`make kind-up`). All 18 scenarios in the suite pass on kind
-  v0.32/Kubernetes v1.36.1: 16 failure scenarios cover the classified causes,
+  v0.32 against Kubernetes v1.36.1, v1.35.5 and v1.34.8 (containerd 2.3.1): 16 failure scenarios cover the classified causes,
   and one successful slow-start regression guards against readiness false
   positives. Each scenario creates a disposable namespace
   and deletes it at the end of the test (`t.Cleanup`); always use real,
