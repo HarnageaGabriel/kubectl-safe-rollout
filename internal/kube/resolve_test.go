@@ -35,6 +35,7 @@ func TestSplitRef(t *testing.T) {
 		{ref: "without-slash", wantErr: true},
 		{ref: "deployment/", wantErr: true},
 		{ref: "/api", wantErr: true},
+		{ref: "foo/bar/baz", wantErr: true},
 		{ref: "", wantErr: true},
 	}
 

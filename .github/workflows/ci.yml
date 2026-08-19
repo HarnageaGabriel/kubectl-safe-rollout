@@ -74,6 +74,9 @@ jobs:
       - name: Test (all packages)
         run: go test ./...
 
+      - name: Test with race detector
+        run: go test -race ./...
+
       - name: Coverage (internal/ only)
         # The coverage gate measures only internal/...: cmd/ is cobra wiring
         # with no domain logic, and in Go 1.26+ a package without test files is
