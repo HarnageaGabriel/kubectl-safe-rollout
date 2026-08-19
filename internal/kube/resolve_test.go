@@ -16,6 +16,7 @@ package kube
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -58,6 +59,13 @@ func TestSplitRef(t *testing.T) {
 	}
 }
 
+func deploymentFixture(name string) *appsv1.Deployment {
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec:       appsv1.DeploymentSpec{Replicas: func() *int32 { r := int32(3); return &r }()},
+	}
+}
+
 func TestResolveWorkload_Deployment(t *testing.T) {
 	d := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "checkout", Namespace: "default"},
@@ -74,12 +82,66 @@ func TestResolveWorkload_Deployment(t *testing.T) {
 	}
 }
 
+// The kinds a user will plausibly type, including the short forms kubectl
+// accepts. Each must fail with a message that names both the kind it rejected
+// and what is supported: a bare "not found" would send someone looking for a
+// missing object instead of an unsupported feature.
 func TestResolveWorkload_UnsupportedKind(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	unsupported := []string{
+		"statefulset/checkout",
+		"statefulsets/checkout",
+		"sts/checkout",
+		"daemonset/checkout",
+		"daemonsets/checkout",
+		"ds/checkout",
+		"pod/checkout",
+		"job/checkout",
+		"cronjob/checkout",
+		"rollout/checkout",
+		"nonsense/checkout",
+	}
 
-	_, err := ResolveWorkload(context.Background(), client, "default", "statefulset/checkout")
-	if err == nil {
-		t.Fatal("expected error for kind unsupported in MVP, got nil")
+	for _, ref := range unsupported {
+		t.Run(ref, func(t *testing.T) {
+			client := fake.NewSimpleClientset()
+
+			_, err := ResolveWorkload(context.Background(), client, "default", ref)
+			if err == nil {
+				t.Fatalf("expected an error for unsupported reference %q, got nil", ref)
+			}
+			kind := strings.SplitN(ref, "/", 2)[0]
+			if !strings.Contains(err.Error(), kind) {
+				t.Errorf("error must name the rejected kind %q, got: %v", kind, err)
+			}
+			if !strings.Contains(strings.ToLower(err.Error()), "deployment") {
+				t.Errorf("error must name what is supported, got: %v", err)
+			}
+		})
+	}
+}
+
+// Case and the short/plural forms kubectl itself accepts must all resolve, so
+// that a habit formed with kubectl does not fail here for no reason.
+func TestResolveWorkload_AcceptedDeploymentAliases(t *testing.T) {
+	for _, ref := range []string{
+		"deployment/checkout",
+		"deployments/checkout",
+		"deploy/checkout",
+		"Deployment/checkout",
+		"DEPLOY/checkout",
+		"deployment.apps/checkout",
+	} {
+		t.Run(ref, func(t *testing.T) {
+			client := fake.NewSimpleClientset(deploymentFixture("checkout"))
+
+			w, err := ResolveWorkload(context.Background(), client, "default", ref)
+			if err != nil {
+				t.Fatalf("reference %q must resolve, got: %v", ref, err)
+			}
+			if w.Name() != "checkout" {
+				t.Errorf("resolved workload name = %q, expected checkout", w.Name())
+			}
+		})
 	}
 }
 

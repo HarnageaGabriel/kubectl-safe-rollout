@@ -26,7 +26,7 @@
   quality criterion), in `test/e2e/`. They are isolated from the rest of the
   suite with the `e2e` build tag: they do not run in `go test ./...` or in CI
   (no cluster is available there), only with `make test-e2e` against an active
-  kind cluster (`make kind-up`). All 17 scenarios in the suite pass on kind
+  kind cluster (`make kind-up`). All 18 scenarios in the suite pass on kind
   v0.32/Kubernetes v1.36.1: 16 failure scenarios cover the classified causes,
   and one successful slow-start regression guards against readiness false
   positives. Each scenario creates a disposable namespace
