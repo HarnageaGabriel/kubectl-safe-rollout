@@ -1,4 +1,4 @@
-.PHONY: build test race fuzz test-verbose cover lint fmt vet check-fmt tidy release-check release-snapshot kind-up kind-down test-e2e
+.PHONY: build test race fuzz test-e2e-versions test-verbose cover lint fmt vet check-fmt tidy release-check release-snapshot kind-up kind-down test-e2e
 
 BINARY := kubectl-safe_rollout
 KIND_CLUSTER := safe-rollout
@@ -63,6 +63,31 @@ kind-up:
 
 kind-down:
 	kind delete cluster --name $(KIND_CLUSTER)
+
+# E2E_MINORS are the Kubernetes minor versions the project claims to support.
+# They are pinned to exact patch releases so a run is reproducible and so the
+# README can state what was actually exercised rather than "recent versions".
+E2E_MINORS := v1.36.1 v1.35.5 v1.34.8
+
+# test-e2e-versions repeats the whole e2e suite against one throwaway cluster
+# per supported minor. It exists because the messages this tool classifies are
+# emitted by kubelet, the scheduler and the container runtime, and those are
+# exactly the components that change between minors: a suite that only ever
+# runs on one version proves the classification works there and nowhere else.
+#
+# Each cluster is deleted afterwards, including on failure, so a broken run
+# does not leave several clusters behind eating memory.
+test-e2e-versions:
+	@set -e; \
+	for version in $(E2E_MINORS); do \
+		cluster="sr-$$(echo $$version | tr . -)"; \
+		echo "=== Kubernetes $$version (cluster $$cluster) ==="; \
+		kind create cluster --name "$$cluster" --image "kindest/node:$$version" --wait 180s; \
+		status=0; \
+		E2E_CONTEXT="kind-$$cluster" go test -tags e2e ./test/e2e/... -timeout 45m || status=$$?; \
+		kind delete cluster --name "$$cluster"; \
+		if [ "$$status" -ne 0 ]; then echo "e2e failed on Kubernetes $$version"; exit "$$status"; fi; \
+	done
 
 # test-e2e requires an active kind cluster (make kind-up) and Docker running:
 # it creates and deletes real resources in the kind-safe-rollout context; see

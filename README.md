@@ -168,12 +168,15 @@ Each category has an `*-undetermined` variant for confirmed failures that lack e
 
 ## Verified and not verified
 
-Verified: 18 end-to-end scenarios on kind v0.32.0 with Kubernetes v1.36.1 and containerd 2.2: 16 failure scenarios cover the classified causes, one successful slow-start regression guards against readiness false positives, and one runs `check` as a deliberately restricted ServiceAccount to prove that a check which cannot read a resource degrades to a visible `SKIP` instead of failing the run or reporting a clean result. They run with `make test-e2e` against a real cluster and real kubelet, scheduler, and containerd event messages.
+Verified: 18 end-to-end scenarios, run in full against **three Kubernetes minor versions** — v1.36.1, v1.35.5 and v1.34.8 — on kind v0.32.0 with containerd 2.3.1. All 18 pass on each.
+
+Of those scenarios, 16 cover the classified causes, one is a slow-start regression that guards against readiness false positives by requiring a completed rollout with no finding at all, and one runs `check` as a deliberately restricted ServiceAccount to prove that a check which cannot read a resource degrades to a visible `SKIP` rather than failing the run or reporting a clean result.
+
+They run with `make test-e2e` against a real cluster, against real kubelet, scheduler and containerd event messages rather than fixtures. `make test-e2e-versions` repeats the suite across the three minors.
 
 Not verified:
 
-- The other two supported Kubernetes minor versions.
-- CRI-O. Only containerd has been exercised, so event-message patterns for other runtimes are unconfirmed.
+- CRI-O. Only containerd has been exercised, so the event-message patterns for other runtimes are unconfirmed. This is the largest remaining gap: the messages this tool matches are produced by the runtime, not by Kubernetes.
 - Reconnection after a real etcd compaction or HTTP 410 `resourceVersion` expiry. That path has only been exercised against a fake clientset.
 - API load and event correlation on large, busy namespaces.
 
