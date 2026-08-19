@@ -57,9 +57,10 @@ kubectl safe-rollout check deployment/checkout
 kubectl safe-rollout check deployment/checkout --output json
 kubectl safe-rollout watch deployment/checkout
 kubectl safe-rollout watch deployment/checkout --output json
+kubectl safe-rollout watch deployment/checkout --timeout 10m
 ```
 
-The plugin honours the current kubeconfig, context, and namespace, including `--context`, `--namespace`, and `--kubeconfig`.
+The plugin honours the current kubeconfig, context, and namespace, including `--context`, `--namespace`, and `--kubeconfig`. `watch` waits indefinitely by default, matching `kubectl rollout status`; pass `--timeout` to bound it, which reports a clear timeout message instead of hanging forever when a stall has no classifiable cause.
 
 The exit code is non-zero if and only if the report contains at least one `high` severity finding. `medium` and `low` findings provide context and do not fail a CI pipeline.
 
@@ -154,6 +155,7 @@ A PodDisruptionBudget is enforced by the Eviction API—for example, during `kub
 - Pending: `pending-insufficient-resources`, `pending-scheduling-constraints`, `pending-unbound-pvc`.
 - Quota: `quota-exceeded`.
 - Progress deadline: `progress-deadline-exceeded`.
+- Paused rollout: `rollout-paused`, reported immediately from `spec.paused` rather than waiting for a symptom that will never appear.
 
 Each category has an `*-undetermined` variant for confirmed failures that lack enough evidence for a more specific cause. These IDs are stable: JSON output exposes them, and CI gates should key on them.
 
@@ -168,7 +170,7 @@ Each category has an `*-undetermined` variant for confirmed failures that lack e
 
 ## Verified and not verified
 
-Verified: 18 end-to-end scenarios, run in full against **three Kubernetes minor versions** — v1.36.1, v1.35.5 and v1.34.8 — on kind v0.32.0 with containerd 2.3.1. All 18 pass on each.
+Verified: 19 end-to-end scenarios, run in full against **three Kubernetes minor versions** — v1.36.1, v1.35.5 and v1.34.8 — on kind v0.32.0 with containerd 2.3.1. All 19 pass on each (re-verified after adding the rollout-paused scenario).
 
 Of those scenarios, 16 cover the classified causes, one is a slow-start regression that guards against readiness false positives by requiring a completed rollout with no finding at all, and one runs `check` as a deliberately restricted ServiceAccount to prove that a check which cannot read a resource degrades to a visible `SKIP` rather than failing the run or reporting a clean result.
 

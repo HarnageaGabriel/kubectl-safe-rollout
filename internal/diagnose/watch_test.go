@@ -16,6 +16,7 @@ package diagnose_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -595,5 +596,37 @@ func TestWatch_EventsInaccessible_DegradesWithoutLosingStructuredSignals(t *test
 	}
 	if !foundSkip {
 		t.Fatalf("missing Result.Skipped for inaccessible Events: %+v", outcome.Results)
+	}
+}
+
+// runWatch's --timeout flag (cmd/kubectl-safe_rollout) relies on Watch
+// propagating context.DeadlineExceeded rather than swallowing it or hanging
+// past the deadline. Reproduces the real gap found running `watch` against a
+// Deployment paused mid-rollout on kind, before the Paused Diagnoser existed:
+// with nothing for any Diagnoser to classify and the rollout genuinely not
+// complete, Watch had no way to stop on its own.
+func TestWatch_ContextDeadlineExceeded_ReturnsContextError(t *testing.T) {
+	d := watchDeployment() // never reaches RolloutComplete(): see its own comment.
+	client := fake.NewSimpleClientset(d, watchHealthyPod())
+	withListResourceVersion(client, "1")
+	wt := diagnose.WatchTarget{
+		Namespace:       testNamespace,
+		Workload:        workload.FromDeployment(d),
+		Client:          client,
+		StabilityWindow: 50 * time.Millisecond,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := diagnose.Watch(ctx, wt)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context.DeadlineExceeded, got %v", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("Watch took %s to return after the deadline: it must stop promptly, not linger", elapsed)
 	}
 }

@@ -81,6 +81,21 @@ func TestInitContainer_OOMKilled(t *testing.T) {
 	if len(res.Findings) != 1 || res.Findings[0].CheckID != string(diagnose.CauseInitContainerOOMKilled) {
 		t.Fatalf("expected 1 finding %q, got %+v", diagnose.CauseInitContainerOOMKilled, res.Findings)
 	}
+	// Unlike the app-error and undetermined causes, the fix here is already
+	// known (the memory limit is too low): telling the reader to check logs
+	// would send them looking for an explanation an OOMKilled container never
+	// leaves behind. Observed on kind: an init container killed mid-write
+	// left only its already-flushed output, no error message.
+	remediation := res.Findings[0].Remediation
+	if strings.Contains(remediation.Summary, "logs") || len(remediation.Commands) != 0 {
+		t.Errorf("OOMKilled remediation must not point at logs; the cause is already known: %+v", remediation)
+	}
+	if !strings.Contains(remediation.Summary, "limits.memory") {
+		t.Errorf("OOMKilled remediation must name the actual fix (raise limits.memory), got %q", remediation.Summary)
+	}
+	if !remediation.ContextDependent {
+		t.Error("no safe memory value can be suggested without knowing the workload, so this must stay ContextDependent")
+	}
 }
 
 func TestInitContainer_Undetermined_CrashLoopWithoutTerminationState(t *testing.T) {

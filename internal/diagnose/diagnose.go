@@ -118,6 +118,7 @@ func registeredDiagnosers() []Diagnoser {
 		Pending{},
 		Quota{},
 		ProgressDeadline{},
+		Paused{},
 	}
 }
 
