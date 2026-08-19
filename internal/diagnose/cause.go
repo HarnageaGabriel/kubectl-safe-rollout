@@ -145,4 +145,13 @@ const (
 	// here: the condition itself is the cause, read from Status.Conditions,
 	// not derived from a text pattern.
 	CauseProgressDeadlineExceeded CauseID = "progress-deadline-exceeded"
+
+	// CauseRolloutPaused means spec.paused is true: the Deployment
+	// controller takes no action on a paused rollout at all, including
+	// never evaluating progressDeadlineSeconds against it (Kubernetes
+	// freezes that deadline while paused). Watch would otherwise wait
+	// forever without ever producing a Finding. Like
+	// CauseProgressDeadlineExceeded, there is no ambiguity to resolve: the
+	// boolean field itself is the cause, not a text pattern to interpret.
+	CauseRolloutPaused CauseID = "rollout-paused"
 )

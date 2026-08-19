@@ -102,6 +102,13 @@ type Workload interface {
 	// yet exceeded", never "definitely not exceeded": callers must not confuse
 	// the two.
 	ProgressDeadlineExceeded() (message string, ok bool)
+	// Paused reports spec.paused. A paused Deployment's controller takes no
+	// action at all: it does not create or update Pods, and Kubernetes
+	// itself freezes progressDeadlineSeconds while paused, so
+	// ProgressDeadlineExceeded never fires either. Without this, `watch`
+	// would wait indefinitely on a paused rollout with no way to explain
+	// why.
+	Paused() bool
 }
 
 type deploymentWorkload struct {
@@ -236,4 +243,9 @@ func (w *deploymentWorkload) ProgressDeadlineExceeded() (message string, ok bool
 		}
 	}
 	return "", false
+}
+
+// Paused implements Workload.
+func (w *deploymentWorkload) Paused() bool {
+	return w.d.Spec.Paused
 }

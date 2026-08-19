@@ -89,18 +89,40 @@ func (d InitContainer) classify(ctx context.Context, target Target, pod corev1.P
 
 	switch {
 	case term != nil && term.Reason == "OOMKilled":
-		return d.finding(resource, pod, cs, CauseInitContainerOOMKilled,
-			fmt.Sprintf("init container %q in %s is killed by the kernel (OOMKilled) before initialization completes", cs.Name, resource), evidence, false)
+		// Unlike the application-error and undetermined cases, the cause is
+		// already known here: the kernel killed the container for exceeding
+		// its memory limit. Suggesting "check the logs" would send the reader
+		// looking for an explanation that does not exist there (observed on
+		// kind: an init container OOMKilled mid-write leaves only whatever it
+		// had already flushed, never a reason). The remediation matches
+		// CrashLoop's classifyOOMKilled for the same reason: raising a memory
+		// limit is a business decision this tool cannot make safely, so it
+		// names the fix without prescribing a number.
+		return model.Finding{
+			CheckID:  string(CauseInitContainerOOMKilled),
+			Severity: model.SeverityHigh,
+			Cause:    fmt.Sprintf("init container %q in %s is killed by the kernel (OOMKilled) before initialization completes", cs.Name, resource),
+			Evidence: evidence,
+			Remediation: model.Remediation{
+				Summary:          fmt.Sprintf("increase limits.memory for init container %q or reduce what it allocates during initialization; the correct value depends on the actual usage profile and cannot be safely suggested without context", cs.Name),
+				ContextDependent: true,
+			},
+			Resource: resource,
+		}
 	case term != nil && term.ExitCode != 0:
-		return d.finding(resource, pod, cs, CauseInitContainerAppError,
+		return d.logBasedFinding(resource, pod, cs, CauseInitContainerAppError,
 			fmt.Sprintf("init container %q in %s exits with application error code %d before initialization completes", cs.Name, resource, term.ExitCode), evidence, false)
 	default:
-		return d.finding(resource, pod, cs, CauseInitContainerUndetermined,
+		return d.logBasedFinding(resource, pod, cs, CauseInitContainerUndetermined,
 			fmt.Sprintf("init container %q in %s is in CrashLoopBackOff but its termination state does not identify the cause", cs.Name, resource), evidence, true)
 	}
 }
 
-func (InitContainer) finding(resource model.ResourceRef, pod corev1.Pod, cs corev1.ContainerStatus, causeID CauseID, cause string, evidence []string, undetermined bool) model.Finding {
+// logBasedFinding is for causes where the previous log tail is the only lead
+// available: an application error the container itself explains, or no known
+// cause at all. It is not used for OOMKilled, where the fix is already known
+// and pointing at logs would be a wrong suggestion, not just a redundant one.
+func (InitContainer) logBasedFinding(resource model.ResourceRef, pod corev1.Pod, cs corev1.ContainerStatus, causeID CauseID, cause string, evidence []string, undetermined bool) model.Finding {
 	return model.Finding{
 		CheckID:  string(causeID),
 		Severity: model.SeverityHigh,
