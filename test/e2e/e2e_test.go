@@ -31,9 +31,11 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/diagnose"
@@ -65,6 +67,65 @@ func newE2EClient(t *testing.T) kubernetes.Interface {
 	client, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		t.Fatalf("creating Kubernetes client: %v", err)
+	}
+	return client
+}
+
+// newE2EConfig returns the rest.Config the other helpers build their client
+// from. It is separate from newE2EClient because a scenario that needs to act
+// as a different identity has to keep the cluster address and its TLS settings
+// while replacing only the credentials.
+func newE2EConfig(t *testing.T) *rest.Config {
+	t.Helper()
+	ctxName := os.Getenv("E2E_CONTEXT")
+	if ctxName == "" {
+		ctxName = defaultE2EContext
+	}
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	overrides := &clientcmd.ConfigOverrides{CurrentContext: ctxName}
+	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, overrides).ClientConfig()
+	if err != nil {
+		t.Fatalf("configuration for context %q is unavailable: %v (a kind cluster is required: kind create cluster --name safe-rollout)", ctxName, err)
+	}
+	return cfg
+}
+
+// newServiceAccountClient builds a client authenticated as the given
+// ServiceAccount, using a short-lived token requested from the API server.
+//
+// It deliberately strips every credential the kubeconfig carries rather than
+// only setting BearerToken: a leftover client certificate would keep
+// authenticating the test as the cluster admin, and the scenario would pass
+// while proving nothing about restricted permissions.
+func newServiceAccountClient(t *testing.T, namespace, serviceAccount string) kubernetes.Interface {
+	t.Helper()
+	admin := newE2EClient(t)
+	expiration := int64(3600)
+	token, err := admin.CoreV1().ServiceAccounts(namespace).CreateToken(
+		context.Background(),
+		serviceAccount,
+		&authenticationv1.TokenRequest{Spec: authenticationv1.TokenRequestSpec{ExpirationSeconds: &expiration}},
+		metav1.CreateOptions{},
+	)
+	if err != nil {
+		t.Fatalf("requesting a token for ServiceAccount %s/%s: %v", namespace, serviceAccount, err)
+	}
+
+	cfg := rest.CopyConfig(newE2EConfig(t))
+	cfg.CertFile = ""
+	cfg.KeyFile = ""
+	cfg.CertData = nil
+	cfg.KeyData = nil
+	cfg.Username = ""
+	cfg.Password = ""
+	cfg.AuthProvider = nil
+	cfg.ExecProvider = nil
+	cfg.BearerTokenFile = ""
+	cfg.BearerToken = token.Status.Token
+
+	client, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		t.Fatalf("creating client for ServiceAccount %s/%s: %v", namespace, serviceAccount, err)
 	}
 	return client
 }

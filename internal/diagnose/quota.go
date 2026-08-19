@@ -36,36 +36,76 @@ type Quota struct{}
 // ID implements Diagnoser.
 func (Quota) ID() string { return QuotaDiagnoserID }
 
+// maxQuotaEvidence bounds how many FailedCreate messages a single Finding
+// prints. The ReplicaSet controller keeps retrying for as long as the quota
+// stays exhausted, so the event list grows without bound while every entry
+// says the same thing apart from the generated pod name. Three is enough to
+// show the shape of the rejection and which quota it names; the rest are
+// reported as a count rather than dropped silently, because output that
+// looks complete while hiding what it removed is the failure mode this
+// project refuses everywhere else.
+const maxQuotaEvidence = 3
+
+// capEvidence truncates to maxQuotaEvidence entries, appending a line that
+// states how many were omitted.
+func capEvidence(evidence []string) []string {
+	if len(evidence) <= maxQuotaEvidence {
+		return evidence
+	}
+	capped := append([]string(nil), evidence[:maxQuotaEvidence]...)
+	return append(capped, fmt.Sprintf("... and %d more rejections with the same cause", len(evidence)-maxQuotaEvidence))
+}
+
 // Diagnose implements Diagnoser.
+//
+// One rejected pod creation produces one FailedCreate event, so a rollout
+// of N replicas blocked by quota produces N events describing a single
+// failure. They are collapsed into one Finding per cause with the
+// individual messages kept as separate Evidence lines: the per-pod
+// messages are worth reading (they name which pods were rejected) but
+// printing the same cause and the same remediation N times is noise
+// exactly where the output is read under pressure. This grouping is not
+// generalised to the other Diagnosers, which iterate over Pods: there,
+// two Findings mean two genuinely different objects failing.
 func (d Quota) Diagnose(_ context.Context, target Target) (Result, error) {
 	var findings []model.Finding
 	for _, rs := range target.ReplicaSets {
 		resource := model.ResourceRef{Kind: "ReplicaSet", Namespace: rs.Namespace, Name: rs.Name}
+
+		var exceeded, undetermined []string
 		for _, e := range target.EventsByUID[rs.UID] {
 			if e.Reason != "FailedCreate" {
 				continue
 			}
-			evidence := []string{fmt.Sprintf("event: %s", e.Message)}
+			message := fmt.Sprintf("event: %s", e.Message)
 			if pattern.QuotaExceeded(e.Message) {
-				findings = append(findings, model.Finding{
-					CheckID:  string(CauseQuotaExceeded),
-					Severity: model.SeverityHigh,
-					Cause:    fmt.Sprintf("%s cannot create pods: the namespace ResourceQuota is exhausted", resource),
-					Evidence: evidence,
-					Remediation: model.Remediation{
-						Summary:          "increase the namespace ResourceQuota, reduce workload requests, or free capacity by terminating other workloads; the correct choice depends on what the namespace hosts and who has authority over it",
-						Commands:         []string{fmt.Sprintf("kubectl describe resourcequota -n %s", rs.Namespace)},
-						ContextDependent: true,
-					},
-					Resource: resource,
-				})
+				exceeded = append(exceeded, message)
 				continue
 			}
+			undetermined = append(undetermined, message)
+		}
+
+		if len(exceeded) > 0 {
+			findings = append(findings, model.Finding{
+				CheckID:  string(CauseQuotaExceeded),
+				Severity: model.SeverityHigh,
+				Cause:    fmt.Sprintf("%s cannot create pods: the namespace ResourceQuota is exhausted", resource),
+				Evidence: capEvidence(exceeded),
+				Remediation: model.Remediation{
+					Summary:          "increase the namespace ResourceQuota, reduce workload requests, or free capacity by terminating other workloads; the correct choice depends on what the namespace hosts and who has authority over it",
+					Commands:         []string{fmt.Sprintf("kubectl describe resourcequota -n %s", rs.Namespace)},
+					ContextDependent: true,
+				},
+				Resource: resource,
+			})
+		}
+
+		if len(undetermined) > 0 {
 			findings = append(findings, model.Finding{
 				CheckID:  string(CauseQuotaUndetermined),
 				Severity: model.SeverityHigh,
 				Cause:    fmt.Sprintf("%s cannot create pods, but the event message does not mention an exceeded ResourceQuota", resource),
-				Evidence: evidence,
+				Evidence: capEvidence(undetermined),
 				Remediation: model.Remediation{
 					Summary:          "read the full FailedCreate event message: it may be an admission webhook or another constraint, not necessarily a quota",
 					Commands:         []string{fmt.Sprintf("kubectl describe replicaset %s -n %s", rs.Name, rs.Namespace)},

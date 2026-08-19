@@ -168,14 +168,13 @@ Each category has an `*-undetermined` variant for confirmed failures that lack e
 
 ## Verified and not verified
 
-Verified: 17 end-to-end scenarios on kind v0.32.0 with Kubernetes v1.36.1 and containerd 2.2: 16 failure scenarios cover the classified causes, and one successful slow-start regression guards against readiness false positives. They run with `make test-e2e` against a real cluster and real kubelet, scheduler, and containerd event messages.
+Verified: 18 end-to-end scenarios on kind v0.32.0 with Kubernetes v1.36.1 and containerd 2.2: 16 failure scenarios cover the classified causes, one successful slow-start regression guards against readiness false positives, and one runs `check` as a deliberately restricted ServiceAccount to prove that a check which cannot read a resource degrades to a visible `SKIP` instead of failing the run or reporting a clean result. They run with `make test-e2e` against a real cluster and real kubelet, scheduler, and containerd event messages.
 
 Not verified:
 
 - The other two supported Kubernetes minor versions.
 - CRI-O. Only containerd has been exercised, so event-message patterns for other runtimes are unconfirmed.
 - Reconnection after a real etcd compaction or HTTP 410 `resourceVersion` expiry. That path has only been exercised against a fake clientset.
-- Operation under a namespace-scoped read-only ServiceAccount with restricted RBAC.
 - API load and event correlation on large, busy namespaces.
 
 This list exists because a diagnosis tool that overstates what it has tested is worse than one that reports less.
