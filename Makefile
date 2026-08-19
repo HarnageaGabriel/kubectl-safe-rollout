@@ -1,4 +1,4 @@
-.PHONY: build test test-verbose cover lint fmt vet check-fmt tidy release-check release-snapshot kind-up kind-down test-e2e
+.PHONY: build test race fuzz test-verbose cover lint fmt vet check-fmt tidy release-check release-snapshot kind-up kind-down test-e2e
 
 BINARY := kubectl-safe_rollout
 KIND_CLUSTER := safe-rollout
@@ -8,6 +8,20 @@ build:
 
 test:
 	go test ./...
+
+# The watch loop is the project's only concurrent code, so keep it covered by the race detector.
+race:
+	go test -race ./...
+
+# CI does not run time-boxed, non-deterministic fuzzing; contributors can run
+# this target before changing the pattern package.
+fuzz:
+	go test -run=Fuzz -fuzz=FuzzMissingConfigObject -fuzztime=10s ./internal/diagnose/pattern/
+	go test -run=Fuzz -fuzz=FuzzImagePullFailure -fuzztime=10s ./internal/diagnose/pattern/
+	go test -run=Fuzz -fuzz=FuzzLivenessKilling -fuzztime=10s ./internal/diagnose/pattern/
+	go test -run=Fuzz -fuzz=FuzzReadinessFailure -fuzztime=10s ./internal/diagnose/pattern/
+	go test -run=Fuzz -fuzz=FuzzFailedScheduling -fuzztime=10s ./internal/diagnose/pattern/
+	go test -run=Fuzz -fuzz=FuzzQuotaExceeded -fuzztime=10s ./internal/diagnose/pattern/
 
 test-verbose:
 	go test ./... -v

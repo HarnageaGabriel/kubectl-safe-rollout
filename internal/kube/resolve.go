@@ -50,7 +50,7 @@ func ResolveWorkload(ctx context.Context, clientset kubernetes.Interface, namesp
 }
 
 func splitRef(ref string) (kind, name string, err error) {
-	parts := strings.SplitN(ref, "/", 2)
+	parts := strings.Split(ref, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "", "", fmt.Errorf("invalid reference %q, expected <kind>/<name> (e.g. deployment/api)", ref)
 	}

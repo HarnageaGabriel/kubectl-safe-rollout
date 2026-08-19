@@ -16,6 +16,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -59,8 +60,8 @@ func newCheckCommand(configFlags *genericclioptions.ConfigFlags) *cobra.Command 
 }
 
 func runCheck(cmd *cobra.Command, configFlags *genericclioptions.ConfigFlags, ref, outputFormat string) error {
-	if outputFormat != "human" && outputFormat != "json" {
-		return fmt.Errorf("invalid --output: %q (expected human or json)", outputFormat)
+	if err := validateOutputFormat(outputFormat); err != nil {
+		return err
 	}
 
 	ctx := cmd.Context()
@@ -106,11 +107,22 @@ func runCheck(cmd *cobra.Command, configFlags *genericclioptions.ConfigFlags, re
 
 	report := output.NewReport(groups)
 
+	return renderCheckReport(cmd.OutOrStdout(), report, outputFormat)
+}
+
+func validateOutputFormat(outputFormat string) error {
+	if outputFormat != "human" && outputFormat != "json" {
+		return fmt.Errorf("invalid --output: %q (expected human or json)", outputFormat)
+	}
+	return nil
+}
+
+func renderCheckReport(w io.Writer, report output.Report, outputFormat string) error {
 	var renderErr error
 	if outputFormat == "json" {
-		renderErr = output.RenderJSON(cmd.OutOrStdout(), report)
+		renderErr = output.RenderJSON(w, report)
 	} else {
-		renderErr = output.RenderHuman(cmd.OutOrStdout(), report)
+		renderErr = output.RenderHuman(w, report)
 	}
 	if renderErr != nil {
 		return renderErr
