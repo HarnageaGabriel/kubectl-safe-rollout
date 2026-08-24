@@ -35,6 +35,7 @@ func registeredChecks() []check.Check {
 	return []check.Check{
 		check.PDBConsistency{},
 		check.QuotaHeadroom{},
+		check.ServiceAccountExists{},
 		check.RequestsVsUsage{},
 		check.ProbeSanity{},
 		check.ResourceLimits{},

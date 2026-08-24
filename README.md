@@ -137,6 +137,7 @@ The evidence includes the tail of the previous container's log. The suggested `k
 | --- | --- | --- |
 | `pdb-consistency` | high | Workload replicas and update strategy; matching PodDisruptionBudget selectors, specification, and status. |
 | `quota-headroom` | high | Workload update strategy, calculated surge, pod resource requests, and live ResourceQuota hard and used values. |
+| `serviceaccount-exists` | high | The ServiceAccount named in the pod template (or the implicit `default`). Not a heuristic: a Deployment naming one that does not exist will never create a single Pod. |
 | `requests-vs-usage` | medium | Selected live Pods and their requests plus the Pod Metrics API. It needs metrics-server and skips cleanly without it. |
 | `probe-sanity` | low | Readiness and liveness probes in the live workload's pod template. |
 | `resource-limits` | low | CPU and memory limits in the live workload's pod template. |
