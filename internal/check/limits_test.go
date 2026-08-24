@@ -102,6 +102,57 @@ func TestResourceLimits_BothLimitsMissing_TwoFindings(t *testing.T) {
 	}
 }
 
+// Found on kind: a Deployment with a fully-limited regular container and a
+// limit-less init container reported clean, because InitContainers were
+// never inspected at all. The kubelet enforces an init container's cgroup
+// limits exactly like a regular one's, so this was a genuine blind spot,
+// not a stylistic omission.
+func TestResourceLimits_InitContainerMissingLimits_FlaggedDistinctly(t *testing.T) {
+	d := deploymentWithContainers(corev1.Container{
+		Name: "app",
+		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("500m"),
+			corev1.ResourceMemory: resource.MustParse("256Mi"),
+		}},
+	})
+	d.Spec.Template.Spec.InitContainers = []corev1.Container{{Name: "setup"}}
+
+	res := runResourceLimitsCheck(t, d)
+	if len(res.Findings) != 2 {
+		t.Fatalf("want 2 findings (CPU + memory) for the limit-less init container, got %+v", res.Findings)
+	}
+	for _, f := range res.Findings {
+		if !strings.Contains(f.Cause, "init container") || !strings.Contains(f.Cause, "setup") {
+			t.Errorf("cause must identify %q as an init container, not a regular one: %q", "setup", f.Cause)
+		}
+		if f.Resource.Name != "checkout/setup" {
+			t.Errorf("resource ref = %+v, want name checkout/setup", f.Resource)
+		}
+	}
+}
+
+func TestResourceLimits_InitContainerWithLimits_NoFindingsForIt(t *testing.T) {
+	d := deploymentWithContainers(corev1.Container{
+		Name: "app",
+		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("500m"),
+			corev1.ResourceMemory: resource.MustParse("256Mi"),
+		}},
+	})
+	d.Spec.Template.Spec.InitContainers = []corev1.Container{{
+		Name: "setup",
+		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+			corev1.ResourceMemory: resource.MustParse("64Mi"),
+		}},
+	}}
+
+	res := runResourceLimitsCheck(t, d)
+	if len(res.Findings) != 0 {
+		t.Fatalf("both containers fully limited: want 0 findings, got %+v", res.Findings)
+	}
+}
+
 func TestResourceLimits_BothLimitsPresent_NoFindings(t *testing.T) {
 	res := runResourceLimitsCheck(t, deploymentWithContainers(corev1.Container{
 		Name: "app",

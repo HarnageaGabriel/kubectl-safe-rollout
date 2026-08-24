@@ -140,7 +140,7 @@ The evidence includes the tail of the previous container's log. The suggested `k
 | `serviceaccount-exists` | high | The ServiceAccount named in the pod template (or the implicit `default`). Not a heuristic: a Deployment naming one that does not exist will never create a single Pod. |
 | `requests-vs-usage` | medium | Selected live Pods and their requests plus the Pod Metrics API. It needs metrics-server and skips cleanly without it. |
 | `probe-sanity` | low | Readiness and liveness probes in the live workload's pod template. |
-| `resource-limits` | low | CPU and memory limits in the live workload's pod template. |
+| `resource-limits` | low | CPU and memory limits in the live workload's pod template, both regular and init containers. |
 | `image-pull-secrets` | low/medium | Container image hostnames, and imagePullSecrets on the pod template, ServiceAccount, and the Secret objects they name. Low when nothing is declared (heuristic: the registry may still be public); medium when a declared Secret does not exist (a verified fact, not a guess). |
 
 A PodDisruptionBudget is enforced by the Eviction API—for example, during `kubectl drain` or evictions initiated by the cluster-autoscaler or descheduler—and **not** by the Deployment controller when it replaces pods during a rolling update. `pdb-consistency` does not claim that a PDB blocks `kubectl rollout`; it reports that a node drain concurrent with the rollout window will stay blocked.

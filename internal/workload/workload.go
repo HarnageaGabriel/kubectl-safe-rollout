@@ -82,6 +82,16 @@ type Workload interface {
 	// must read per-container Probe and Resources: a dedicated DTO would add
 	// indirection without hiding Kubernetes details.
 	PodContainers() []corev1.Container
+	// InitContainers exposes the pod template's init containers, kept
+	// separate from PodContainers because the two are not interchangeable
+	// for every check: probes on init containers are not a real Kubernetes
+	// feature (kubelet does not act on them, since an init container runs
+	// to completion rather than continuously), so probe-sanity has no
+	// reason to read this. Resource limits, on the other hand, apply to an
+	// init container exactly as they do to a regular one — the kubelet
+	// enforces its cgroup limits the same way, and an init container
+	// without a memory limit can OOM the node just as a regular one can.
+	InitContainers() []corev1.Container
 	// ImagePullSecretNames exposes the names of secrets declared directly in
 	// the pod template. Secrets inherited from the ServiceAccount require a
 	// cluster read and remain the responsibility of the check that needs them.
@@ -183,6 +193,11 @@ func (w *deploymentWorkload) PodRequests() corev1.ResourceList {
 // PodContainers implements Workload.
 func (w *deploymentWorkload) PodContainers() []corev1.Container {
 	return w.d.Spec.Template.Spec.Containers
+}
+
+// InitContainers implements Workload.
+func (w *deploymentWorkload) InitContainers() []corev1.Container {
+	return w.d.Spec.Template.Spec.InitContainers
 }
 
 // ImagePullSecretNames implements Workload.
