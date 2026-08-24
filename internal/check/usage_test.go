@@ -17,6 +17,7 @@ package check_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -166,6 +167,37 @@ func TestRequestsVsUsage_CPUAboveRequest_Medium(t *testing.T) {
 	}
 	if !f.Remediation.ContextDependent {
 		t.Error("remediation must declare itself context-dependent")
+	}
+}
+
+// Observed on kind with a live metrics-server: the Metrics API reports CPU
+// usage in raw nanocores, and the evidence line printed "request=1m
+// usage=500659974n", forcing the reader to convert units to see that usage
+// was roughly 500x the request. Both sides must render in the same,
+// human-scaled unit.
+func TestRequestsVsUsage_CPUEvidence_NormalizedToMillicores(t *testing.T) {
+	pod := podWithRequests("app-1", "1m", "512Mi")
+	metricsClient := metricsClientWith(podMetrics("app-1", "500659974n", "300Mi"))
+	res := runUsageCheck(t, deploymentWithSelector(1), metricsClient, pod)
+
+	if len(res.Findings) != 1 {
+		t.Fatalf("want 1 finding, got %+v", res.Findings)
+	}
+	var cpuEvidence string
+	for _, e := range res.Findings[0].Evidence {
+		if strings.HasPrefix(e, "cpu:") {
+			cpuEvidence = e
+		}
+	}
+	if cpuEvidence == "" {
+		t.Fatalf("no cpu evidence line, got %+v", res.Findings[0].Evidence)
+	}
+	if strings.Contains(cpuEvidence, "n") && !strings.Contains(cpuEvidence, "m") {
+		t.Errorf("evidence still in raw nanocores instead of millicores: %q", cpuEvidence)
+	}
+	want := "cpu: request=1m usage=501m"
+	if cpuEvidence != want {
+		t.Errorf("cpu evidence = %q, want %q", cpuEvidence, want)
 	}
 }
 
