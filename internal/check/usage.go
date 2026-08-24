@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/model"
@@ -106,6 +107,23 @@ func indexContainerRequests(pods []corev1.Pod) map[podContainerKey]corev1.Resour
 	return m
 }
 
+// formatQuantity re-renders a resource.Quantity in the scale a human expects
+// for that resource, instead of whatever scale the value happened to arrive
+// in. Declared requests come from a parsed pod spec (e.g. "1m"), and usage
+// comes from the Metrics API, which reports CPU in raw nanocores and can
+// leave a Quantity's internal Format such that String() prints it that way
+// (observed on kind: "usage=500659974n" next to "request=1m" in the same
+// evidence line, forcing the reader to convert units to see that usage is
+// roughly 500x the request). Re-normalizing both sides to the same unit is
+// what makes the comparison readable at a glance, which is the whole point
+// of evidence meant to be read during an incident.
+func formatQuantity(name corev1.ResourceName, q resource.Quantity) string {
+	if name == corev1.ResourceCPU {
+		return resource.NewMilliQuantity(q.MilliValue(), resource.DecimalSI).String()
+	}
+	return resource.NewQuantity(q.Value(), resource.BinarySI).String()
+}
+
 func usageExceedsRequestFinding(namespace, podName, containerName string, requests, usage corev1.ResourceList, workloadRef string) (model.Finding, bool) {
 	var evidence []string
 	for _, resName := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
@@ -115,7 +133,7 @@ func usageExceedsRequestFinding(namespace, podName, containerName string, reques
 			continue
 		}
 		if use.Cmp(req) > 0 {
-			evidence = append(evidence, fmt.Sprintf("%s: request=%s usage=%s", resName, req.String(), use.String()))
+			evidence = append(evidence, fmt.Sprintf("%s: request=%s usage=%s", resName, formatQuantity(resName, req), formatQuantity(resName, use)))
 		}
 	}
 	if len(evidence) == 0 {
