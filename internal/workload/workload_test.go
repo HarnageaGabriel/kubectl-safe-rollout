@@ -129,6 +129,23 @@ func TestFromDeployment_PodContainers_ExcludesInitContainers(t *testing.T) {
 	}
 }
 
+func TestFromDeployment_InitContainers_ExcludesRegularContainers(t *testing.T) {
+	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "migrations"}},
+			Containers: []corev1.Container{
+				{Name: "app"},
+				{Name: "sidecar"},
+			},
+		}},
+	}}
+
+	got := workload.FromDeployment(d).InitContainers()
+	if len(got) != 1 || got[0].Name != "migrations" {
+		t.Fatalf("InitContainers() = %+v, expected only migrations", got)
+	}
+}
+
 func TestFromDeployment_ImagePullSecretsAndServiceAccount(t *testing.T) {
 	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{
 		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
