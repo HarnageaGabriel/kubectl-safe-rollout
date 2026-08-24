@@ -174,3 +174,25 @@ func TestQuotaExceeded_DifferentMessage(t *testing.T) {
 		t.Fatal("a webhook rejection is not a quota exceeded message")
 	}
 }
+
+func TestServiceAccountMissing_RealMessageFromKind(t *testing.T) {
+	name, ok := pattern.ServiceAccountMissing(`Error creating: pods "app-d74c6df5d-" is forbidden: error looking up service account badsa/does-not-exist-sa: serviceaccount "does-not-exist-sa" not found`)
+	if !ok {
+		t.Fatal("expected a match on the real captured message")
+	}
+	if name != "does-not-exist-sa" {
+		t.Errorf("name = %q, expected %q", name, "does-not-exist-sa")
+	}
+}
+
+func TestServiceAccountMissing_UnrelatedFailedCreateMessage_NoMatch(t *testing.T) {
+	for _, message := range []string{
+		`Error creating: pods "app-abc123-" is forbidden: exceeded quota: tight, requested: pods=1, used: pods=1, limited: pods=1`,
+		`Error creating: admission webhook "policy.example.com" denied the request: missing required label`,
+		``,
+	} {
+		if _, ok := pattern.ServiceAccountMissing(message); ok {
+			t.Errorf("pattern.ServiceAccountMissing(%q) matched, expected no match", message)
+		}
+	}
+}

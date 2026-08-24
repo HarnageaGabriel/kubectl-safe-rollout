@@ -153,7 +153,7 @@ A PodDisruptionBudget is enforced by the Eviction API—for example, during `kub
 - Init container: `initcontainer-app-error`, `initcontainer-oomkilled`, `initcontainer-undetermined`.
 - Readiness: `readiness-probe-failing`, `readiness-undetermined`. Readiness is reported only after the Deployment controller has concluded that the rollout is not progressing, so a slow-starting application is not flagged.
 - Pending: `pending-insufficient-resources`, `pending-scheduling-constraints`, `pending-unbound-pvc`.
-- Quota: `quota-exceeded`.
+- Pod creation rejected: `quota-exceeded`, `serviceaccount-missing` (the pod template references a ServiceAccount that does not exist), `quota-undetermined`.
 - Progress deadline: `progress-deadline-exceeded`.
 - Paused rollout: `rollout-paused`, reported immediately from `spec.paused` rather than waiting for a symptom that will never appear.
 
@@ -170,7 +170,7 @@ Each category has an `*-undetermined` variant for confirmed failures that lack e
 
 ## Verified and not verified
 
-Verified: 19 end-to-end scenarios, run in full against **three Kubernetes minor versions** — v1.36.1, v1.35.5 and v1.34.8 — on kind v0.32.0 with containerd 2.3.1. All 19 pass on each (re-verified after adding the rollout-paused scenario).
+Verified: 20 end-to-end scenarios on kind v0.32.0 with containerd 2.3.1. 19 of them, including the `rollout-paused` scenario, have been run in full against **three Kubernetes minor versions** — v1.36.1, v1.35.5 and v1.34.8 — and pass on each; the 20th (`serviceaccount-missing`) is newly added and, as of this writing, verified only at the unit-test level (fake clientset), not yet run end-to-end against a real cluster.
 
 Of those scenarios, 16 cover the classified causes, one is a slow-start regression that guards against readiness false positives by requiring a completed rollout with no finding at all, and one runs `check` as a deliberately restricted ServiceAccount to prove that a check which cannot read a resource degrades to a visible `SKIP` rather than failing the run or reporting a clean result.
 

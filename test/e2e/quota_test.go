@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -58,4 +59,28 @@ func TestWatchE2E_ExhaustedQuota(t *testing.T) {
 	d := deployWorkload(t, client, ns, "quota-esaurita", 2, podSpec, nil)
 
 	watchAndExpectCause(t, client, ns, d, diagnose.CauseQuotaExceeded, 2*time.Minute)
+}
+
+// A ReplicaSet's FailedCreate event is not exclusively a quota signal: a pod
+// template naming a ServiceAccount that does not exist produces the same
+// event Reason on the same object, and was found on kind to be misclassified
+// as quota-undetermined before serviceaccount-missing existed as its own
+// cause.
+func TestWatchE2E_MissingServiceAccount(t *testing.T) {
+	client := newE2EClient(t)
+	ns := newE2ENamespace(t, client)
+
+	podSpec := corev1.PodSpec{
+		ServiceAccountName: "does-not-exist-sa",
+		Containers: []corev1.Container{{
+			Name:  "app",
+			Image: "nginx:1.27",
+		}},
+	}
+	d := deployWorkload(t, client, ns, "missing-serviceaccount", 1, podSpec, func(d *appsv1.Deployment) {
+		seconds := int32(30)
+		d.Spec.ProgressDeadlineSeconds = &seconds
+	})
+
+	watchAndExpectCause(t, client, ns, d, diagnose.CauseServiceAccountMissing, 2*time.Minute)
 }

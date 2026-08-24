@@ -139,6 +139,16 @@ const (
 	// is still a real signal to report, but the specific cause is not.
 	CauseQuotaUndetermined CauseID = "quota-undetermined"
 
+	// CauseServiceAccountMissing means a ReplicaSet cannot create pods
+	// because the pod template names a ServiceAccount that does not exist
+	// in the namespace. Same signal source as the quota causes above (a
+	// Reason=="FailedCreate" event on the ReplicaSet, the pod never
+	// exists), but a distinct and fully deterministic cause: found on kind
+	// via a Deployment referencing a ServiceAccount that had never been
+	// created, which the ResourceQuota diagnoser was mislabeling as
+	// "quota-undetermined" before this cause existed.
+	CauseServiceAccountMissing CauseID = "serviceaccount-missing"
+
 	// CauseProgressDeadlineExceeded means the Deployment controller has
 	// already concluded on its own that the rollout is not progressing
 	// within spec.progressDeadlineSeconds. There is no ambiguity to resolve

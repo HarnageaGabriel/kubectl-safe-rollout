@@ -26,11 +26,14 @@ import (
 // Result.DiagnoserID.
 const QuotaDiagnoserID = "quota"
 
-// Quota classifies pod creation failures blocked by the ResourceQuota
-// admission plugin. It is the only Diagnoser that does not operate on the
-// workload's Pods: when quota blocks creation, the Pod never exists, so
-// there is no Pod to inspect. The signal is on the ReplicaSet's
-// Reason=="FailedCreate" event.
+// Quota classifies pod creation failures reported through the ReplicaSet's
+// Reason=="FailedCreate" event: quota exhaustion is the most common cause,
+// but not the only one an admission plugin can produce there, so this
+// Diagnoser also recognizes a missing ServiceAccount rather than leaving it
+// in the undetermined bucket alongside genuinely unrecognized rejections. It
+// is the only Diagnoser that does not operate on the workload's Pods: when
+// pod creation itself is rejected, the Pod never exists, so there is no Pod
+// to inspect.
 type Quota struct{}
 
 // ID implements Diagnoser.
@@ -73,16 +76,22 @@ func (d Quota) Diagnose(_ context.Context, target Target) (Result, error) {
 		resource := model.ResourceRef{Kind: "ReplicaSet", Namespace: rs.Namespace, Name: rs.Name}
 
 		var exceeded, undetermined []string
+		var missingSA string
+		var missingSAEvidence []string
 		for _, e := range target.EventsByUID[rs.UID] {
 			if e.Reason != "FailedCreate" {
 				continue
 			}
 			message := fmt.Sprintf("event: %s", e.Message)
-			if pattern.QuotaExceeded(e.Message) {
+			switch name, ok := pattern.ServiceAccountMissing(e.Message); {
+			case pattern.QuotaExceeded(e.Message):
 				exceeded = append(exceeded, message)
-				continue
+			case ok:
+				missingSA = name
+				missingSAEvidence = append(missingSAEvidence, message)
+			default:
+				undetermined = append(undetermined, message)
 			}
-			undetermined = append(undetermined, message)
 		}
 
 		if len(exceeded) > 0 {
@@ -100,14 +109,29 @@ func (d Quota) Diagnose(_ context.Context, target Target) (Result, error) {
 			})
 		}
 
+		if len(missingSAEvidence) > 0 {
+			findings = append(findings, model.Finding{
+				CheckID:  string(CauseServiceAccountMissing),
+				Severity: model.SeverityHigh,
+				Cause:    fmt.Sprintf("%s cannot create pods: the pod template references ServiceAccount %q, which does not exist in namespace %q", resource, missingSA, rs.Namespace),
+				Evidence: capEvidence(missingSAEvidence),
+				Remediation: model.Remediation{
+					Summary:          fmt.Sprintf("verify whether ServiceAccount %q should exist in namespace %q, or the pod template should reference a different one", missingSA, rs.Namespace),
+					Commands:         []string{fmt.Sprintf("kubectl get serviceaccount %s -n %s", missingSA, rs.Namespace)},
+					ContextDependent: true,
+				},
+				Resource: resource,
+			})
+		}
+
 		if len(undetermined) > 0 {
 			findings = append(findings, model.Finding{
 				CheckID:  string(CauseQuotaUndetermined),
 				Severity: model.SeverityHigh,
-				Cause:    fmt.Sprintf("%s cannot create pods, but the event message does not mention an exceeded ResourceQuota", resource),
+				Cause:    fmt.Sprintf("%s cannot create pods, but the event message does not mention an exceeded ResourceQuota or a missing ServiceAccount", resource),
 				Evidence: capEvidence(undetermined),
 				Remediation: model.Remediation{
-					Summary:          "read the full FailedCreate event message: it may be an admission webhook or another constraint, not necessarily a quota",
+					Summary:          "read the full FailedCreate event message: it may be an admission webhook or another constraint",
 					Commands:         []string{fmt.Sprintf("kubectl describe replicaset %s -n %s", rs.Name, rs.Namespace)},
 					ContextDependent: true,
 				},
