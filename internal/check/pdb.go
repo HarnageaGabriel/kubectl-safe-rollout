@@ -54,6 +54,16 @@ func (c PDBConsistency) Run(ctx context.Context, target Target) (Result, error) 
 	}
 
 	replicas := target.Workload.Replicas()
+	if replicas == 0 {
+		// A workload scaled to zero has no running Pods for the Eviction API
+		// to ever act on, so a matching PDB cannot currently block anything:
+		// the Cause text below claims a concurrent drain "will remain
+		// blocked", which is false when nothing is running. Found on kind:
+		// this also produced a remediation suggesting "minAvailable: -1", a
+		// value the API server would reject outright (replicas-1 with
+		// replicas=0).
+		return Result{CheckID: c.ID()}, nil
+	}
 	podLabels := labels.Set(target.Workload.PodLabels())
 	strategy := target.Workload.UpdateStrategy()
 

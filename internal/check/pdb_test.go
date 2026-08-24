@@ -132,6 +132,23 @@ func TestPDBConsistency_MaxUnavailableZero_High(t *testing.T) {
 	}
 }
 
+// Found on kind: a Deployment scaled to zero with a minAvailable PDB
+// produced a HIGH finding claiming a concurrent drain "will remain
+// blocked" — false, since zero Pods means the Eviction API has nothing to
+// act on — and a remediation suggesting "minAvailable: -1", a value the
+// PDB admission plugin rejects outright.
+func TestPDBConsistency_ZeroReplicas_NoFindings(t *testing.T) {
+	fifty := intstr.FromString("50%")
+	res := runPDBCheck(t,
+		deployment(0, rollingUpdateStrategy(nil)),
+		pdb("checkout-pdb", podLabels(), intstrPtr(fifty), nil),
+	)
+
+	if len(res.Findings) != 0 {
+		t.Fatalf("a workload with zero replicas has nothing for a PDB to protect: want 0 findings, got %+v", res.Findings)
+	}
+}
+
 func TestPDBConsistency_MinAvailableEqualsReplicas_High(t *testing.T) {
 	three := intstr.FromInt(3)
 	res := runPDBCheck(t,
