@@ -66,13 +66,16 @@ func (c PDBConsistency) Run(ctx context.Context, target Target) (Result, error) 
 	}
 	podLabels := labels.Set(target.Workload.PodLabels())
 	strategy := target.Workload.UpdateStrategy()
+	workloadRef := fmt.Sprintf("%s/%s", target.Workload.Kind(), target.Workload.Name())
 
 	var findings []model.Finding
+	matchedPDB := false
 	for _, pdb := range pdbList.Items {
 		selector, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
 		if err != nil || selector.Empty() || !selector.Matches(podLabels) {
 			continue
 		}
+		matchedPDB = true
 
 		allowed, mode, err := allowedDisruptions(pdb.Spec.MinAvailable, pdb.Spec.MaxUnavailable, replicas)
 		if err != nil {
@@ -84,7 +87,6 @@ func (c PDBConsistency) Run(ctx context.Context, target Target) (Result, error) 
 		}
 
 		resource := model.ResourceRef{Kind: "PodDisruptionBudget", Namespace: pdb.Namespace, Name: pdb.Name}
-		workloadRef := fmt.Sprintf("%s/%s", target.Workload.Kind(), target.Workload.Name())
 
 		if allowed <= 0 {
 			findings = append(findings, model.Finding{
@@ -131,6 +133,29 @@ func (c PDBConsistency) Run(ctx context.Context, target Target) (Result, error) 
 				Resource: resource,
 			})
 		}
+	}
+
+	if !matchedPDB && replicas > 1 {
+		// Severity Low, not High: unlike the findings above, this is not
+		// a verified fact about a concrete blockage, it is the absence of
+		// a safety net that popular offline linters (Popeye, kube-score)
+		// already flag for the same reason. Gated on replicas > 1: a
+		// single-replica workload has no disruption tolerance to budget
+		// for regardless of whether a PDB exists.
+		findings = append(findings, model.Finding{
+			CheckID:  c.ID(),
+			Severity: model.SeverityLow,
+			Cause: fmt.Sprintf(
+				"%s has %d replicas but no PodDisruptionBudget selects its pods: a node drain concurrent with the rollout could terminate more than one replica at once, with nothing to stop it",
+				workloadRef, replicas,
+			),
+			Evidence: []string{fmt.Sprintf("replicas=%d", replicas), "matchingPodDisruptionBudgets=0"},
+			Remediation: model.Remediation{
+				Summary:          fmt.Sprintf("add a PodDisruptionBudget selecting %s's pods (for example maxUnavailable: 1) to bound how many replicas a concurrent drain can take at once; the right value depends on how many replicas can be lost in production", workloadRef),
+				ContextDependent: true,
+			},
+			Resource: model.ResourceRef{Kind: target.Workload.Kind(), Namespace: target.Namespace, Name: target.Workload.Name()},
+		})
 	}
 
 	return Result{CheckID: c.ID(), Findings: findings}, nil
