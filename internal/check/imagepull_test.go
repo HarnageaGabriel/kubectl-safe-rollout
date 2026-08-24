@@ -155,6 +155,26 @@ func TestImagePullSecrets_DeclaredSecretOnServiceAccountDoesNotExist_MediumFindi
 	}
 }
 
+// The same missing name declared on both the Pod and its ServiceAccount
+// must not be reported twice: it is one broken reference, not two.
+func TestImagePullSecrets_SameMissingSecretOnPodAndServiceAccount_ListedOnce(t *testing.T) {
+	d := deploymentWithContainers(corev1.Container{Name: "app", Image: "registry.internal:5000/app:v1"})
+	d.Spec.Template.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: "shared-missing"}}
+	serviceAccount := &corev1.ServiceAccount{
+		ObjectMeta:       metav1.ObjectMeta{Name: "default", Namespace: testNamespace},
+		ImagePullSecrets: []corev1.LocalObjectReference{{Name: "shared-missing"}},
+	}
+
+	result := runImagePullSecretsCheck(t, d, serviceAccount)
+	if result.Skipped || len(result.Findings) != 1 {
+		t.Fatalf("want one non-skipped finding, got %+v", result)
+	}
+	count := strings.Count(result.Findings[0].Cause, "shared-missing")
+	if count != 1 {
+		t.Errorf("cause must name the shared missing Secret once, not %d times: %q", count, result.Findings[0].Cause)
+	}
+}
+
 // One working Secret among several declared names is enough coverage: the
 // others may be unused leftovers, not evidence of a problem.
 func TestImagePullSecrets_OneOfSeveralDeclaredSecretsExists_NoFindings(t *testing.T) {
