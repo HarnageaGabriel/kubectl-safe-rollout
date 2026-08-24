@@ -135,7 +135,7 @@ The evidence includes the tail of the previous container's log. The suggested `k
 
 | ID | Severity | What it needs from the cluster |
 | --- | --- | --- |
-| `pdb-consistency` | high | Workload replicas and update strategy; matching PodDisruptionBudget selectors, specification, and status. |
+| `pdb-consistency` | high/low | Workload replicas and update strategy; matching PodDisruptionBudget selectors, specification, and status. High for a PDB that leaves no disruption headroom; low (informational, not a verified blockage) when a workload with more than one replica has no matching PDB at all. |
 | `quota-headroom` | high | Workload update strategy, calculated surge, pod resource requests, and live ResourceQuota hard and used values. |
 | `serviceaccount-exists` | high | The ServiceAccount named in the pod template (or the implicit `default`). Not a heuristic: a Deployment naming one that does not exist will never create a single Pod. |
 | `service-routing` | high | Services in the namespace whose selector matches the pod template's labels, their ports, and — once the workload has at least one ready pod — their EndpointSlices. Catches a rollout that succeeds by every other measure while the Service in front of it silently drops all traffic: a named `targetPort` no container declares, or zero ready endpoints despite ready pods. |

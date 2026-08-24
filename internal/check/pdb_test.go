@@ -99,14 +99,35 @@ func runPDBCheck(t *testing.T, d *appsv1.Deployment, objs ...runtime.Object) che
 	return res
 }
 
-func TestPDBConsistency_NoPDB(t *testing.T) {
+func TestPDBConsistency_NoPDB_MultiReplica_LowFinding(t *testing.T) {
 	res := runPDBCheck(t, deployment(3, rollingUpdateStrategy(nil)))
 
 	if res.Skipped {
 		t.Fatalf("check must not be skipped when no PDB exists, got skip reason %q", res.SkipReason)
 	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("want 1 finding for a multi-replica workload with no PDB, got %d: %+v", len(res.Findings), res.Findings)
+	}
+	f := res.Findings[0]
+	if f.Severity != model.SeverityLow {
+		t.Errorf("severity = %v, want Low: absence of a PDB is not a verified blockage, only a missing safety net", f.Severity)
+	}
+	if f.CheckID != check.PDBCheckID {
+		t.Errorf("checkID = %q, want %q", f.CheckID, check.PDBCheckID)
+	}
+	if !f.Remediation.ContextDependent {
+		t.Errorf("remediation must declare itself context-dependent: the right maxUnavailable/minAvailable value depends on production tolerance")
+	}
+}
+
+// A single-replica workload has no disruption tolerance to budget for
+// regardless of whether a PDB exists: flagging it would be noise, not a
+// missed safety net.
+func TestPDBConsistency_NoPDB_SingleReplica_NoFindings(t *testing.T) {
+	res := runPDBCheck(t, deployment(1, rollingUpdateStrategy(nil)))
+
 	if len(res.Findings) != 0 {
-		t.Fatalf("want 0 findings without a PDB in the namespace, got %d: %+v", len(res.Findings), res.Findings)
+		t.Fatalf("want 0 findings for a single-replica workload with no PDB, got %+v", res.Findings)
 	}
 }
 
@@ -173,15 +194,21 @@ func TestPDBConsistency_SufficientBudget_NoFindings(t *testing.T) {
 	}
 }
 
-func TestPDBConsistency_NonMatchingSelector_Ignored(t *testing.T) {
+// A PDB that exists in the namespace but selects a different workload
+// offers this workload no protection at all: it must be treated the same
+// as no PDB existing, not silently ignored.
+func TestPDBConsistency_NonMatchingSelector_TreatedAsNoPDB(t *testing.T) {
 	zero := intstr.FromInt(0)
 	res := runPDBCheck(t,
 		deployment(3, rollingUpdateStrategy(nil)),
 		pdb("altro-pdb", map[string]string{"app": "altro-servizio"}, nil, intstrPtr(zero)),
 	)
 
-	if len(res.Findings) != 0 {
-		t.Fatalf("a PDB with a non-matching selector must not produce findings, got %+v", res.Findings)
+	if len(res.Findings) != 1 {
+		t.Fatalf("want 1 low finding for the missing PDB, not one derived from the unrelated PDB's zero-headroom spec, got %+v", res.Findings)
+	}
+	if res.Findings[0].Severity != model.SeverityLow || res.Findings[0].Resource.Kind != "Deployment" {
+		t.Errorf("unexpected finding: %+v, want the Low missing-PDB finding referencing the workload, not the unrelated PDB", res.Findings[0])
 	}
 }
 
