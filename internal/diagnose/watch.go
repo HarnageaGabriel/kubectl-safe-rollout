@@ -74,6 +74,34 @@ const undeterminedGraceWindow = 3 * time.Second
 // drift toward polling as the primary mechanism.
 const gracePollInterval = 500 * time.Millisecond
 
+// pausedSettleWindow is how long to keep checking for other diagnosable
+// problems after a tick finds only that the rollout is paused, when no
+// container has restarted yet. Discovered on kind: pausing an
+// already-crashlooping Deployment made `watch` report rollout-paused alone,
+// every time. Paused needs no pod symptom to fire (it reads spec.paused on
+// the very first tick), while CrashLoopBackOff's Waiting state is only
+// visible for part of the kubelet's restart cycle, so the first tick almost
+// never lands on it. A paused workload is a stable, non-evolving state —
+// nothing about it changes while it stays paused — so spending a short
+// window double-checking for a pre-existing problem costs nothing and
+// risks nothing, unlike widening the general "a determined cause always
+// takes immediate precedence" rule for an in-flight rollout that is still
+// genuinely changing.
+//
+// When a container has already restarted at least once, handleTick uses
+// restartedWindow instead (see restartedRolloutStabilityWindow): measured
+// on kind, a container at restartCount=4-5 went roughly 90 seconds between
+// Pod updates, far past this window, because the kubelet's own backoff
+// between attempts keeps growing. Restart evidence is exactly the signal
+// that predicts this window will not be enough.
+const pausedSettleWindow = 5 * time.Second
+
+// pausedSettlePollInterval mirrors gracePollInterval for the same reason:
+// the condition being waited for (an unrelated diagnoser also becoming
+// determined) produces no watch event of its own, so periodic rereads are
+// the only way to catch it within pausedSettleWindow.
+const pausedSettlePollInterval = 500 * time.Millisecond
+
 // WatchTarget groups what is needed to observe a rollout: the workload to
 // observe and the clients used to read its state. It is distinct from
 // Target, which represents state already read at a single instant:
@@ -95,6 +123,9 @@ type WatchTarget struct {
 	// UndeterminedGraceWindow overrides undeterminedGraceWindow when >0,
 	// for the same reason as StabilityWindow.
 	UndeterminedGraceWindow time.Duration
+	// PausedSettleWindow overrides pausedSettleWindow when >0, for the same
+	// reason as StabilityWindow.
+	PausedSettleWindow time.Duration
 }
 
 // Outcome is the result of a completed observation: either the rollout
@@ -150,6 +181,10 @@ func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string,
 	if graceWindow <= 0 {
 		graceWindow = undeterminedGraceWindow
 	}
+	pausedWindow := wt.PausedSettleWindow
+	if pausedWindow <= 0 {
+		pausedWindow = pausedSettleWindow
+	}
 
 	var stability *time.Timer
 	var stabilityCh <-chan time.Time
@@ -166,12 +201,23 @@ func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string,
 	var graceTickCh <-chan time.Time
 	var graceDeadline time.Time
 	var pendingUndetermined Outcome
+	// pausedTicker mirrors graceTicker's mechanism (see pausedSettleWindow)
+	// but for a different predicate: the outcome is entirely explained by
+	// Paused, and this tick is given a bounded chance to also observe an
+	// unrelated diagnoser becoming determined before finalizing.
+	var pausedTicker *time.Ticker
+	var pausedTickCh <-chan time.Time
+	var pausedDeadline time.Time
+	var pendingPausedOnly Outcome
 	defer func() {
 		if stability != nil {
 			stability.Stop()
 		}
 		if graceTicker != nil {
 			graceTicker.Stop()
+		}
+		if pausedTicker != nil {
+			pausedTicker.Stop()
 		}
 	}()
 	stopGrace := func() {
@@ -182,6 +228,14 @@ func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string,
 		}
 		graceDeadline = time.Time{}
 	}
+	stopPausedSettle := func() {
+		if pausedTicker != nil {
+			pausedTicker.Stop()
+			pausedTicker = nil
+			pausedTickCh = nil
+		}
+		pausedDeadline = time.Time{}
+	}
 	handleTick := func() (Outcome, bool, error) {
 		restarts.observe(pods)
 		tr, err := evaluateTick(ctx, wt, pods)
@@ -190,6 +244,7 @@ func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string,
 		}
 		switch {
 		case tr.failureFound && allUndetermined(tr.outcome):
+			stopPausedSettle()
 			pendingUndetermined = tr.outcome
 			switch {
 			case graceTicker == nil:
@@ -202,13 +257,45 @@ func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string,
 				stopGrace()
 				return pendingUndetermined, true, nil
 			}
-		case tr.failureFound:
-			// At least one Finding is determined: it is the most specific
-			// possible signal and always takes immediate precedence.
+		case tr.failureFound && isPausedOnly(tr.outcome):
 			stopGrace()
+			pendingPausedOnly = tr.outcome
+			switch {
+			case pausedTicker == nil:
+				// A container that has already restarted at least once is
+				// evidence that something was wrong before the pause, and the
+				// kubelet's own restart backoff (see
+				// restartedRolloutStabilityWindow) can keep the next
+				// Waiting=CrashLoopBackOff transition dozens of seconds away.
+				// Reuse that same, already-justified longer window instead of
+				// inventing a second unrelated constant; with no restart
+				// evidence yet, there is nothing pointing at a longer wait
+				// being worth the latency.
+				window := pausedWindow
+				if anyRestartObserved(pods) {
+					window = restartedWindow
+				}
+				pausedDeadline = time.Now().Add(window)
+				pausedTicker = time.NewTicker(pausedSettlePollInterval)
+				pausedTickCh = pausedTicker.C
+			case time.Now().After(pausedDeadline):
+				// The window expired with nothing else determined: paused is
+				// genuinely the whole story, at least for now.
+				stopPausedSettle()
+				return pendingPausedOnly, true, nil
+			}
+		case tr.failureFound:
+			// At least one Finding is determined and it is not explained by
+			// Paused alone: it is the most specific possible signal (which
+			// now includes rollout-paused too, if this tick still finds it,
+			// since evaluateTick reruns every Diagnoser) and always takes
+			// immediate precedence.
+			stopGrace()
+			stopPausedSettle()
 			return tr.outcome, true, nil
 		default:
 			stopGrace()
+			stopPausedSettle()
 		}
 		// RolloutComplete can remain true while a liveness probe repeatedly
 		// kills a container. The pod may become Ready again during the
@@ -298,6 +385,13 @@ func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string,
 			if outcome, done, err := handleTick(); done {
 				return outcome, false, err
 			}
+		case <-pausedTickCh:
+			// Check again while rollout-paused is the only finding: see the
+			// pausedSettleWindow comment above. handleTick decides whether
+			// the window has expired.
+			if outcome, done, err := handleTick(); done {
+				return outcome, false, err
+			}
 		case ev, ok := <-rw.ResultChan():
 			if relist, err := checkWatchEvent(ctx, ev, ok, "pod", wt.Workload.Name()); relist || err != nil {
 				return Outcome{}, relist, err
@@ -328,6 +422,25 @@ func allUndetermined(o Outcome) bool {
 		for _, f := range res.Findings {
 			any = true
 			if !f.Undetermined {
+				return false
+			}
+		}
+	}
+	return any
+}
+
+// isPausedOnly reports whether every Finding in the Outcome came from the
+// Paused Diagnoser. Used to decide whether a tick's outcome is worth a
+// second look (see pausedSettleWindow) before finalizing: Paused fires with
+// no pod symptom at all, so it can preempt an unrelated, already-true
+// problem (a crash loop, a stuck image pull) that simply had not been
+// captured by this exact tick's snapshot yet.
+func isPausedOnly(o Outcome) bool {
+	any := false
+	for _, res := range o.Results {
+		for range res.Findings {
+			any = true
+			if res.DiagnoserID != PausedDiagnoserID {
 				return false
 			}
 		}
@@ -400,6 +513,19 @@ func collectContainerRestartCounts(pods map[types.UID]corev1.Pod) containerResta
 		}
 	}
 	return counts
+}
+
+// anyRestartObserved reports whether any container in pods has already
+// restarted at least once, regardless of when. Used to pick a longer
+// pausedSettleWindow: prior restarts are evidence something was already
+// wrong before the workload was paused.
+func anyRestartObserved(pods map[types.UID]corev1.Pod) bool {
+	for _, count := range collectContainerRestartCounts(pods) {
+		if count > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (baseline containerRestartCounts) increased(pods map[types.UID]corev1.Pod) bool {
