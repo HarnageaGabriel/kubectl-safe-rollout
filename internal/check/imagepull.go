@@ -77,7 +77,7 @@ func (c ImagePullSecrets) Run(ctx context.Context, target Target) (Result, error
 		return Skip(c.ID(), fmt.Sprintf("failed to read ServiceAccount %q: %v", serviceAccountName, err)), nil
 	}
 
-	declared := append(append([]string(nil), target.Workload.ImagePullSecretNames()...), serviceAccountSecretNames(serviceAccount)...)
+	declared := dedupNames(append(append([]string(nil), target.Workload.ImagePullSecretNames()...), serviceAccountSecretNames(serviceAccount)...))
 
 	if len(declared) == 0 {
 		return Result{CheckID: c.ID(), Findings: noSecretDeclaredFindings(target, privateContainers, serviceAccountName)}, nil
@@ -92,6 +92,24 @@ func (c ImagePullSecrets) Run(ctx context.Context, target Target) (Result, error
 	}
 
 	return Result{CheckID: c.ID(), Findings: declaredSecretMissingFindings(target, privateContainers, serviceAccountName, missing)}, nil
+}
+
+// dedupNames removes repeated entries while preserving first-seen order.
+// The same Secret name can legitimately be declared on both the Pod and its
+// ServiceAccount (for example, someone redundantly re-declaring the
+// ServiceAccount's default); without this, a missing shared name would be
+// listed twice in a finding's evidence and remediation text.
+func dedupNames(names []string) []string {
+	seen := make(map[string]bool, len(names))
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
 }
 
 // serviceAccountSecretNames extracts the imagePullSecret names declared on a
