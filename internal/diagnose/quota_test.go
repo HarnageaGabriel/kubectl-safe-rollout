@@ -186,3 +186,61 @@ func TestQuota_ManyRejections_EvidenceIsCappedAndSaysSo(t *testing.T) {
 		t.Errorf("the summary line must state how many rejections were omitted, got %q", last)
 	}
 }
+
+// Discovered running check/watch against a Deployment whose pod template
+// referenced a ServiceAccount that had never been created: the event was a
+// FailedCreate on the ReplicaSet, exactly like quota exhaustion, but the
+// diagnoser was dumping it into quota-undetermined even though the message
+// unambiguously names the missing ServiceAccount.
+func TestQuota_MissingServiceAccount_ClassifiedNotUndetermined(t *testing.T) {
+	rs := []appsv1.ReplicaSet{replicaSet("app-abc123")}
+	events := []corev1.Event{
+		event("rs-uid", "FailedCreate", `Error creating: pods "app-abc123-" is forbidden: error looking up service account demo/does-not-exist-sa: serviceaccount "does-not-exist-sa" not found`),
+	}
+	target := newTarget(t, nil, events, rs)
+
+	res, err := diagnose.Quota{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if len(res.Findings) != 1 || res.Findings[0].CheckID != string(diagnose.CauseServiceAccountMissing) {
+		t.Fatalf("expected 1 finding %q, got %+v", diagnose.CauseServiceAccountMissing, res.Findings)
+	}
+	f := res.Findings[0]
+	if f.Undetermined {
+		t.Error("the missing ServiceAccount is named explicitly in the event message: this must not be Undetermined")
+	}
+	if !strings.Contains(f.Cause, "does-not-exist-sa") {
+		t.Errorf("Cause must name the missing ServiceAccount, got %q", f.Cause)
+	}
+	if !strings.Contains(f.Remediation.Commands[0], "does-not-exist-sa") {
+		t.Errorf("remediation command must reference the missing ServiceAccount, got %q", f.Remediation.Commands[0])
+	}
+}
+
+// A ReplicaSet rejected for quota AND a missing ServiceAccount at once (e.g.
+// a rolling update surging into an exhausted quota after someone breaks the
+// ServiceAccount reference) must classify both, not merge or drop either.
+func TestQuota_QuotaAndMissingServiceAccount_ProduceTwoFindings(t *testing.T) {
+	rs := []appsv1.ReplicaSet{replicaSet("app-abc123")}
+	events := []corev1.Event{
+		event("rs-uid", "FailedCreate", `Error creating: pods "app-abc123-hwx76" is forbidden: exceeded quota: tight, requested: pods=1, used: pods=1, limited: pods=1`),
+		event("rs-uid", "FailedCreate", `Error creating: pods "app-abc123-" is forbidden: error looking up service account demo/does-not-exist-sa: serviceaccount "does-not-exist-sa" not found`),
+	}
+	target := newTarget(t, nil, events, rs)
+
+	res, err := diagnose.Quota{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if len(res.Findings) != 2 {
+		t.Fatalf("expected 2 distinct findings, got %d: %+v", len(res.Findings), res.Findings)
+	}
+	byID := map[string]bool{}
+	for _, f := range res.Findings {
+		byID[f.CheckID] = true
+	}
+	if !byID[string(diagnose.CauseQuotaExceeded)] || !byID[string(diagnose.CauseServiceAccountMissing)] {
+		t.Errorf("expected both causes present, got %+v", res.Findings)
+	}
+}
