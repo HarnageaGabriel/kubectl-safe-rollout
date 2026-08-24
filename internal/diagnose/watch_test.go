@@ -506,6 +506,158 @@ func TestWatch_UndeterminedRefinesWithinGraceWindow(t *testing.T) {
 	}
 }
 
+// TestWatch_PausedWithPreexistingCrashLoop_ReportsBothCauses reproduces a
+// bug found on kind: pausing an already-crashlooping Deployment made Watch()
+// report rollout-paused alone, every time. Paused fires on the very first
+// tick (spec.paused needs no pod symptom), while CrashLoopBackOff's Waiting
+// state is only visible for part of the kubelet's restart cycle, so the
+// first tick almost never lands on it — the pod happens to be healthy here
+// specifically to guarantee tick 1 is paused-only, then the transition to
+// CrashLoopBackOff arrives afterward, exactly as it would on a real cluster.
+func TestWatch_PausedWithPreexistingCrashLoop_ReportsBothCauses(t *testing.T) {
+	d := watchDeployment()
+	d.Spec.Paused = true
+	client := fake.NewSimpleClientset(d, watchHealthyPod())
+	withListResourceVersion(client, "1")
+	wt := diagnose.WatchTarget{
+		Namespace:          testNamespace,
+		Workload:           workload.FromDeployment(d),
+		Client:             client,
+		PausedSettleWindow: 2 * time.Second,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	type result struct {
+		outcome diagnose.Outcome
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		outcome, err := diagnose.Watch(ctx, wt)
+		done <- result{outcome, err}
+	}()
+
+	// Short wait, well within the 2s settle window: this is when tick 1
+	// (paused-only) has already happened and the settle ticker is running.
+	time.Sleep(200 * time.Millisecond)
+	updatePodToCrashLoop(t, client)
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("Watch returned an unexpected error: %v", r.err)
+		}
+		findings := diagnose.AllFindings(r.outcome.Results)
+		var hasPaused, hasCrashLoop bool
+		for _, f := range findings {
+			switch f.CheckID {
+			case string(diagnose.CauseRolloutPaused):
+				hasPaused = true
+			case string(diagnose.CauseCrashLoopOOMKilled):
+				hasCrashLoop = true
+			}
+		}
+		if !hasPaused || !hasCrashLoop {
+			t.Fatalf("expected both rollout-paused and the crash loop cause, got %+v", findings)
+		}
+	case <-ctx.Done():
+		t.Fatal("Watch did not finish before the timeout")
+	}
+}
+
+// TestWatch_PausedWithExistingRestarts_UsesLongerSettleWindow proves the
+// settle window actually lengthens when restart evidence is already present
+// at pause-detection time. Measured on kind: a container at restartCount
+// 4-5 went roughly 90 seconds between Pod updates, because the kubelet's
+// backoff between attempts keeps growing — a transition arriving after the
+// short window (but before the long one) must still be caught.
+func TestWatch_PausedWithExistingRestarts_UsesLongerSettleWindow(t *testing.T) {
+	p := watchHealthyPod()
+	p.Status.ContainerStatuses[0].RestartCount = 1
+	d := watchDeployment()
+	d.Spec.Paused = true
+	client := fake.NewSimpleClientset(d, p)
+	withListResourceVersion(client, "1")
+	wt := diagnose.WatchTarget{
+		Namespace: testNamespace,
+		Workload:  workload.FromDeployment(d),
+		Client:    client,
+		// PausedSettleWindow is the short window; it would expire long
+		// before the update below arrives if restart evidence did not
+		// extend it to StabilityWindow (which also sets restartedWindow).
+		PausedSettleWindow: 300 * time.Millisecond,
+		StabilityWindow:    3 * time.Second,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	type result struct {
+		outcome diagnose.Outcome
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		outcome, err := diagnose.Watch(ctx, wt)
+		done <- result{outcome, err}
+	}()
+
+	// After the short window would already have expired, but still within
+	// the longer, restart-aware one.
+	time.Sleep(1 * time.Second)
+	updatePodToCrashLoop(t, client)
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("Watch returned an unexpected error: %v", r.err)
+		}
+		findings := diagnose.AllFindings(r.outcome.Results)
+		var hasCrashLoop bool
+		for _, f := range findings {
+			if f.CheckID == string(diagnose.CauseCrashLoopOOMKilled) {
+				hasCrashLoop = true
+			}
+		}
+		if !hasCrashLoop {
+			t.Fatalf("expected the crash loop cause to still be caught within the longer, restart-aware window, got %+v", findings)
+		}
+	case <-ctx.Done():
+		t.Fatal("Watch did not finish before the timeout")
+	}
+}
+
+// TestWatch_PausedAlone_SettlesAfterWindow proves the settle window added
+// for the case above does not turn a genuinely-just-paused rollout into an
+// indefinite wait: with nothing else ever becoming true, Watch() still
+// returns with only rollout-paused once the window expires.
+func TestWatch_PausedAlone_SettlesAfterWindow(t *testing.T) {
+	d := watchDeployment()
+	d.Spec.Paused = true
+	client := fake.NewSimpleClientset(d, watchHealthyPod())
+	withListResourceVersion(client, "1")
+	wt := diagnose.WatchTarget{
+		Namespace:          testNamespace,
+		Workload:           workload.FromDeployment(d),
+		Client:             client,
+		PausedSettleWindow: 300 * time.Millisecond,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	outcome, err := diagnose.Watch(ctx, wt)
+	if err != nil {
+		t.Fatalf("Watch returned an unexpected error: %v", err)
+	}
+	findings := diagnose.AllFindings(outcome.Results)
+	if len(findings) != 1 || findings[0].CheckID != string(diagnose.CauseRolloutPaused) {
+		t.Fatalf("expected exactly the rollout-paused finding once the settle window expired, got %+v", findings)
+	}
+}
+
 func TestWatch_ProgressDeadlineObservedOnDeployment(t *testing.T) {
 	d := watchDeployment()
 	client := fake.NewSimpleClientset(d, watchHealthyPod())

@@ -156,7 +156,7 @@ A PodDisruptionBudget is enforced by the Eviction API—for example, during `kub
 - Pending: `pending-insufficient-resources`, `pending-scheduling-constraints`, `pending-unbound-pvc`.
 - Pod creation rejected: `quota-exceeded`, `serviceaccount-missing` (the pod template references a ServiceAccount that does not exist), `quota-undetermined`.
 - Progress deadline: `progress-deadline-exceeded`.
-- Paused rollout: `rollout-paused`, reported immediately from `spec.paused` rather than waiting for a symptom that will never appear.
+- Paused rollout: `rollout-paused`, reported immediately from `spec.paused` rather than waiting for a symptom that will never appear. Because it fires with no pod symptom at all, `watch` spends a short settle window (longer if a container has already restarted) checking for another, coexisting cause before finalizing — a rollout paused after it started crash-looping reports both, not just that it is paused.
 
 Each category has an `*-undetermined` variant for confirmed failures that lack enough evidence for a more specific cause. These IDs are stable: JSON output exposes them, and CI gates should key on them.
 
@@ -171,7 +171,7 @@ Each category has an `*-undetermined` variant for confirmed failures that lack e
 
 ## Verified and not verified
 
-Verified: 20 end-to-end scenarios on kind v0.32.0 with containerd 2.3.1. 19 of them, including the `rollout-paused` scenario, have been run in full against **three Kubernetes minor versions** — v1.36.1, v1.35.5 and v1.34.8 — and pass on each; the 20th (`serviceaccount-missing`) is newly added and, as of this writing, verified only at the unit-test level (fake clientset), not yet run end-to-end against a real cluster.
+Verified: 20 end-to-end scenarios on kind v0.32.0 with containerd 2.3.1, all passing against v1.36.1. 19 of them, including the `rollout-paused` scenario, have additionally been run in full against **three Kubernetes minor versions** — v1.36.1, v1.35.5 and v1.34.8 — and pass on each; the 20th (`serviceaccount-missing`) is newly added and, as of this writing, has not yet been re-verified across all three.
 
 Of those scenarios, 16 cover the classified causes, one is a slow-start regression that guards against readiness false positives by requiring a completed rollout with no finding at all, and one runs `check` as a deliberately restricted ServiceAccount to prove that a check which cannot read a resource degrades to a visible `SKIP` rather than failing the run or reporting a clean result.
 
