@@ -81,6 +81,19 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 			Name:    "app",
 			Image:   "busybox:1.36",
 			Command: []string{"sleep", "3600"},
+			// Gives config-references-exist something to actually Get
+			// (and be denied): without a reference in the pod template it
+			// short-circuits before touching the API at all, and this
+			// scenario would never exercise its degrade path.
+			Env: []corev1.EnvVar{{
+				Name: "SOME_VALUE",
+				ValueFrom: &corev1.EnvVarSource{
+					ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "restricted-config"},
+						Key:                  "value",
+					},
+				},
+			}},
 		}},
 	}
 	d := deployWorkload(t, admin, ns, "restricted", 1, podSpec, nil)
@@ -116,6 +129,10 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 	for _, c := range []check.Check{
 		check.PDBConsistency{},
 		check.QuotaHeadroom{},
+		check.ServiceAccountExists{},
+		check.ServiceRouting{},
+		check.IngressRouting{},
+		check.ConfigReferencesExist{},
 		check.ProbeSanity{},
 		check.ResourceLimits{},
 		check.ImagePullSecrets{},
@@ -140,13 +157,21 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 	if len(evaluated) == 0 {
 		t.Fatalf("every check skipped: checks reading only the pod template must still evaluate (skipped=%v)", skipped)
 	}
-	for _, want := range []string{check.ProbeSanityCheckID, check.ResourceLimitsCheckID} {
+	for _, want := range []string{check.ProbeSanityCheckID, check.ResourceLimitsCheckID, check.ServiceAccountExistsCheckID} {
 		if !contains(evaluated, want) {
-			t.Errorf("check %q needs nothing beyond the workload and must not skip (evaluated=%v, skipped=%v)", want, evaluated, skipped)
+			t.Errorf("check %q needs nothing beyond a resource the Role grants and must not skip (evaluated=%v, skipped=%v)", want, evaluated, skipped)
+		}
+	}
+	// service-routing and ingress-routing both need to list services (not
+	// granted); config-references-exist needs to get the ConfigMap the pod
+	// template references (also not granted).
+	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.ConfigReferencesExistCheckID} {
+		if !contains(skipped, want) {
+			t.Errorf("check %q needs a resource the Role withholds and must skip, not fail or silently report clean (evaluated=%v, skipped=%v)", want, evaluated, skipped)
 		}
 	}
 	if len(skipped) == 0 {
-		t.Errorf("no check skipped: the Role deliberately withholds poddisruptionbudgets and resourcequotas, so at least one must degrade (evaluated=%v)", evaluated)
+		t.Errorf("no check skipped: the Role deliberately withholds poddisruptionbudgets, resourcequotas, services, ingresses, and configmaps, so at least one must degrade (evaluated=%v)", evaluated)
 	}
 	t.Logf("under restricted RBAC: evaluated=%v skipped=%v", evaluated, skipped)
 }
