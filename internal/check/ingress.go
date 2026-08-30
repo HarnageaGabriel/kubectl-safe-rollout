@@ -20,6 +20,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/model"
@@ -33,9 +34,12 @@ const IngressRoutingCheckID = "ingress-routing"
 // name or number. If that reference does not resolve, the Ingress
 // controller cannot route to the Service at all — a break external
 // traffic hits even though the Service itself is perfectly healthy and
-// service-routing would report nothing wrong. Severity High: like
-// service-routing, this is a verified fact about a live object
-// cross-reference, not a heuristic.
+// service-routing would report nothing wrong. It also checks, for any
+// Ingress that does route to this workload, that every Secret its
+// spec.tls names actually exists: a missing TLS Secret breaks HTTPS
+// termination the same way a broken backend breaks HTTP routing.
+// Severity High throughout: a verified fact about live objects, not a
+// heuristic.
 type IngressRouting struct{}
 
 // ID implements check.Check.
@@ -65,7 +69,11 @@ func (c IngressRouting) Run(ctx context.Context, target Target) (Result, error) 
 
 	var findings []model.Finding
 	for _, ing := range ingList.Items {
+		relevant := false
 		if ing.Spec.DefaultBackend != nil && ing.Spec.DefaultBackend.Service != nil {
+			if _, ok := servicesByName[ing.Spec.DefaultBackend.Service.Name]; ok {
+				relevant = true
+			}
 			findings = append(findings, backendFindings(ing, servicesByName, *ing.Spec.DefaultBackend.Service)...)
 		}
 		for _, rule := range ing.Spec.Rules {
@@ -76,11 +84,56 @@ func (c IngressRouting) Run(ctx context.Context, target Target) (Result, error) 
 				if path.Backend.Service == nil {
 					continue
 				}
+				if _, ok := servicesByName[path.Backend.Service.Name]; ok {
+					relevant = true
+				}
 				findings = append(findings, backendFindings(ing, servicesByName, *path.Backend.Service)...)
 			}
 		}
+		if relevant {
+			findings = append(findings, tlsSecretFindings(ctx, target, ing)...)
+		}
 	}
 	return Result{CheckID: c.ID(), Findings: findings}, nil
+}
+
+// tlsSecretFindings checks that every Secret an Ingress's spec.tls names
+// actually exists. Only called for Ingresses already determined to route
+// to this workload: an Ingress unrelated to it is out of scope even if
+// its own TLS secret is missing.
+func tlsSecretFindings(ctx context.Context, target Target, ing netv1.Ingress) []model.Finding {
+	var findings []model.Finding
+	for _, tls := range ing.Spec.TLS {
+		if tls.SecretName == "" {
+			continue
+		}
+		_, err := target.Client.CoreV1().Secrets(ing.Namespace).Get(ctx, tls.SecretName, metav1.GetOptions{})
+		switch {
+		case err == nil:
+			continue
+		case apierrors.IsNotFound(err):
+			findings = append(findings, model.Finding{
+				CheckID:  IngressRoutingCheckID,
+				Severity: model.SeverityHigh,
+				Cause: fmt.Sprintf(
+					"Ingress %q references TLS Secret %q, which does not exist in namespace %q: the ingress controller cannot terminate TLS for this Ingress",
+					ing.Name, tls.SecretName, ing.Namespace,
+				),
+				Evidence: []string{fmt.Sprintf("ingress=%s tlsSecret=%s", ing.Name, tls.SecretName)},
+				Remediation: model.Remediation{
+					Summary:          fmt.Sprintf("create Secret %q in namespace %q (for example via cert-manager or manually), or correct the name in Ingress %q's spec.tls", tls.SecretName, ing.Namespace, ing.Name),
+					Commands:         []string{fmt.Sprintf("kubectl get secret %s -n %s", tls.SecretName, ing.Namespace)},
+					ContextDependent: true,
+				},
+				Resource: model.ResourceRef{Kind: "Ingress", Namespace: ing.Namespace, Name: ing.Name},
+			})
+		default:
+			// Best effort: an unreadable Secret is not proof it is
+			// missing, so this entry is silently skipped rather than
+			// reported on incomplete evidence.
+		}
+	}
+	return findings
 }
 
 func backendFindings(ing netv1.Ingress, servicesByName map[string]corev1.Service, backend netv1.IngressServiceBackend) []model.Finding {
