@@ -39,6 +39,7 @@ func registeredChecks() []check.Check {
 		check.ServiceRouting{},
 		check.IngressRouting{},
 		check.ConfigReferencesExist{},
+		check.NetworkPolicyIngress{},
 		check.RequestsVsUsage{},
 		check.ProbeSanity{},
 		check.ResourceLimits{},
