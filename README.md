@@ -19,7 +19,7 @@ Three properties are worth knowing before you install it:
 
 Popeye, Polaris, kube-score, and k8sgpt already cover generic static analysis of manifests well. None of them watches one rollout and classifies its failure cause deterministically without depending on a language model. That gap is the reason for this project.
 
-It is also why `check` prioritises verifications that need live namespace state—PodDisruptionBudget consistency, ResourceQuota headroom, and requests versus real usage—over checks that an offline linter already handles. Probe presence and limit presence remain included at low severity.
+It is also why `check` prioritises verifications that need live namespace state—PodDisruptionBudget consistency, ResourceQuota headroom, requests versus real usage, whether the Services and Ingresses fronting the workload can actually route to it, and whether the ConfigMaps/Secrets it references actually exist—over checks that an offline linter already handles. Probe presence and limit presence remain included at low severity.
 
 ## Installation
 
