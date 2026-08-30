@@ -133,6 +133,7 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 		check.ServiceRouting{},
 		check.IngressRouting{},
 		check.ConfigReferencesExist{},
+		check.NetworkPolicyIngress{},
 		check.ProbeSanity{},
 		check.ResourceLimits{},
 		check.ImagePullSecrets{},
@@ -164,8 +165,9 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 	}
 	// service-routing and ingress-routing both need to list services (not
 	// granted); config-references-exist needs to get the ConfigMap the pod
-	// template references (also not granted).
-	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.ConfigReferencesExistCheckID} {
+	// template references (also not granted); network-policy-ingress needs
+	// to list networkpolicies (also not granted).
+	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.ConfigReferencesExistCheckID, check.NetworkPolicyIngressCheckID} {
 		if !contains(skipped, want) {
 			t.Errorf("check %q needs a resource the Role withholds and must skip, not fail or silently report clean (evaluated=%v, skipped=%v)", want, evaluated, skipped)
 		}
