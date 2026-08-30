@@ -56,19 +56,7 @@ func (c ServiceRouting) Run(ctx context.Context, target Target) (Result, error) 
 		return Skip(c.ID(), fmt.Sprintf("service list is not accessible: %v", err)), nil
 	}
 
-	podLabels := labels.Set(target.Workload.PodLabels())
-	var matching []corev1.Service
-	for _, svc := range svcList.Items {
-		if len(svc.Spec.Selector) == 0 {
-			// Headless/manually-managed Endpoints: nothing here selects
-			// this workload's pods by label, so there is no routing
-			// contract for this check to verify.
-			continue
-		}
-		if labels.SelectorFromSet(svc.Spec.Selector).Matches(podLabels) {
-			matching = append(matching, svc)
-		}
-	}
+	matching := matchingServices(svcList.Items, target.Workload.PodLabels())
 	if len(matching) == 0 {
 		return Result{CheckID: c.ID()}, nil
 	}
@@ -106,6 +94,27 @@ func (c ServiceRouting) Run(ctx context.Context, target Target) (Result, error) 
 		}
 	}
 	return Result{CheckID: c.ID(), Findings: findings}, nil
+}
+
+// matchingServices returns the Services whose selector actually matches
+// podLabels, i.e. the Services that front the workload those labels come
+// from. Shared with ingress-routing, which needs the same set to know
+// which Ingress backends are worth checking.
+func matchingServices(services []corev1.Service, podLabels map[string]string) []corev1.Service {
+	labelSet := labels.Set(podLabels)
+	var matching []corev1.Service
+	for _, svc := range services {
+		if len(svc.Spec.Selector) == 0 {
+			// Headless/manually-managed Endpoints: nothing here selects
+			// this workload's pods by label, so there is no routing
+			// contract for this check to verify.
+			continue
+		}
+		if labels.SelectorFromSet(svc.Spec.Selector).Matches(labelSet) {
+			matching = append(matching, svc)
+		}
+	}
+	return matching
 }
 
 func declaredPortNames(containers []corev1.Container) map[string]bool {
