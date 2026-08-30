@@ -92,6 +92,11 @@ type Workload interface {
 	// enforces its cgroup limits the same way, and an init container
 	// without a memory limit can OOM the node just as a regular one can.
 	InitContainers() []corev1.Container
+	// Volumes exposes the pod template's volumes, for checks that must
+	// verify a ConfigMap or Secret a volume source names actually exists:
+	// a volume can reference either independently of any container's env
+	// or envFrom.
+	Volumes() []corev1.Volume
 	// ImagePullSecretNames exposes the names of secrets declared directly in
 	// the pod template. Secrets inherited from the ServiceAccount require a
 	// cluster read and remain the responsibility of the check that needs them.
@@ -198,6 +203,11 @@ func (w *deploymentWorkload) PodContainers() []corev1.Container {
 // InitContainers implements Workload.
 func (w *deploymentWorkload) InitContainers() []corev1.Container {
 	return w.d.Spec.Template.Spec.InitContainers
+}
+
+// Volumes implements Workload.
+func (w *deploymentWorkload) Volumes() []corev1.Volume {
+	return w.d.Spec.Template.Spec.Volumes
 }
 
 // ImagePullSecretNames implements Workload.
