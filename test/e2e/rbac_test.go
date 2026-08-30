@@ -95,6 +95,11 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 				},
 			}},
 		}},
+		// Gives pvc-exists something to actually Get (and be denied) too.
+		Volumes: []corev1.Volume{{
+			Name:         "data",
+			VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "restricted-data"}},
+		}},
 	}
 	d := deployWorkload(t, admin, ns, "restricted", 1, podSpec, nil)
 
@@ -134,6 +139,7 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 		check.ServiceRouting{},
 		check.IngressRouting{},
 		check.ConfigReferencesExist{},
+		check.PVCExists{},
 		check.NetworkPolicyIngress{},
 		check.ProbeSanity{},
 		check.ResourceLimits{},
@@ -166,10 +172,12 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 	}
 	// service-routing and ingress-routing both need to list services (not
 	// granted); config-references-exist needs to get the ConfigMap the pod
-	// template references (also not granted); network-policy-ingress needs
-	// to list networkpolicies (also not granted); hpa-quota-headroom needs
-	// to list horizontalpodautoscalers (also not granted).
-	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.ConfigReferencesExistCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID} {
+	// template references (also not granted); pvc-exists needs to get the
+	// PersistentVolumeClaim the pod template's volume references (also
+	// not granted); network-policy-ingress needs to list networkpolicies
+	// (also not granted); hpa-quota-headroom needs to list
+	// horizontalpodautoscalers (also not granted).
+	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID} {
 		if !contains(skipped, want) {
 			t.Errorf("check %q needs a resource the Role withholds and must skip, not fail or silently report clean (evaluated=%v, skipped=%v)", want, evaluated, skipped)
 		}
