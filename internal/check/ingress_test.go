@@ -170,6 +170,54 @@ func TestIngressRouting_DefaultBackend_Checked(t *testing.T) {
 	}
 }
 
+func TestIngressRouting_TLSSecretMissing_HighFinding(t *testing.T) {
+	d := deploymentWithSelectorContainers(corev1.Container{Name: "app", Image: "nginx:1.27"})
+	svc := serviceFrontingWorkload("checkout", corev1.ServicePort{Port: 80, TargetPort: intstr.FromInt(8080)})
+	ing := ingressWithBackend("checkout", "checkout", netv1.ServiceBackendPort{Number: 80})
+	ing.Spec.TLS = []netv1.IngressTLS{{Hosts: []string{"checkout.example.com"}, SecretName: "checkout-tls"}}
+
+	result := runIngressRoutingCheck(t, d, svc, ing)
+	if result.Skipped || len(result.Findings) != 1 {
+		t.Fatalf("want one non-skipped finding for the missing TLS Secret, got %+v", result)
+	}
+	f := result.Findings[0]
+	if f.CheckID != check.IngressRoutingCheckID || f.Severity != model.SeverityHigh {
+		t.Errorf("unexpected finding: checkID=%q severity=%v, want High", f.CheckID, f.Severity)
+	}
+	if !strings.Contains(f.Cause, "checkout-tls") {
+		t.Errorf("cause must name the missing Secret, got %q", f.Cause)
+	}
+	if len(f.Remediation.Commands) != 1 || !strings.Contains(f.Remediation.Commands[0], "checkout-tls") {
+		t.Errorf("remediation command must be a read-only inspection of the named Secret, got %+v", f.Remediation.Commands)
+	}
+}
+
+func TestIngressRouting_TLSSecretExists_NoFindings(t *testing.T) {
+	d := deploymentWithSelectorContainers(corev1.Container{Name: "app", Image: "nginx:1.27"})
+	svc := serviceFrontingWorkload("checkout", corev1.ServicePort{Port: 80, TargetPort: intstr.FromInt(8080)})
+	ing := ingressWithBackend("checkout", "checkout", netv1.ServiceBackendPort{Number: 80})
+	ing.Spec.TLS = []netv1.IngressTLS{{Hosts: []string{"checkout.example.com"}, SecretName: "checkout-tls"}}
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "checkout-tls", Namespace: testNamespace}}
+
+	result := runIngressRoutingCheck(t, d, svc, ing, secret)
+	if result.Skipped || len(result.Findings) != 0 {
+		t.Fatalf("TLS Secret exists: want empty result, got %+v", result)
+	}
+}
+
+// An Ingress unrelated to this workload must not have its TLS secret
+// checked at all, even if that secret happens to be missing too.
+func TestIngressRouting_TLSSecretMissing_UnrelatedIngress_Ignored(t *testing.T) {
+	d := deploymentWithSelectorContainers(corev1.Container{Name: "app", Image: "nginx:1.27"})
+	ing := ingressWithBackend("other", "other-service", netv1.ServiceBackendPort{Number: 80})
+	ing.Spec.TLS = []netv1.IngressTLS{{Hosts: []string{"other.example.com"}, SecretName: "other-tls"}}
+
+	result := runIngressRoutingCheck(t, d, ing)
+	if result.Skipped || len(result.Findings) != 0 {
+		t.Fatalf("Ingress does not route to this workload: its TLS secret is out of scope, got %+v", result)
+	}
+}
+
 func TestIngressRouting_ServiceListFailed_Skipped(t *testing.T) {
 	d := deploymentWithSelectorContainers(corev1.Container{Name: "app", Image: "nginx:1.27"})
 	client := fake.NewSimpleClientset()
