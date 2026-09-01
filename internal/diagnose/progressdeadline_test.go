@@ -25,6 +25,29 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/workload"
 )
 
+func TestProgressDeadline_StatefulSet_Skipped(t *testing.T) {
+	s := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: testNamespace, Generation: 1},
+		Status:     appsv1.StatefulSetStatus{ObservedGeneration: 1},
+	}
+	target := newTarget(t, nil, nil, nil)
+	target.Workload = workload.FromStatefulSet(s)
+
+	res, err := diagnose.ProgressDeadline{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if !res.Skipped {
+		t.Fatal("StatefulSet has no progressDeadlineSeconds mechanism: this must be Skipped, not silently empty")
+	}
+	if !strings.Contains(res.SkipReason, "StatefulSet") {
+		t.Errorf("SkipReason must name the missing mechanism's kind, got %q", res.SkipReason)
+	}
+	if len(res.Findings) != 0 {
+		t.Fatalf("a Skipped result must carry no Findings, got %+v", res.Findings)
+	}
+}
+
 func deploymentWithConditions(conditions ...appsv1.DeploymentCondition) *appsv1.Deployment {
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: testNamespace, Generation: 1},

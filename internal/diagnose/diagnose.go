@@ -30,7 +30,6 @@ import (
 	"context"
 	"fmt"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -38,6 +37,22 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/model"
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/workload"
 )
+
+// PodCreationSource identifies the object whose Reason=="FailedCreate"
+// events explain why a workload's pods could not be created. For
+// Deployment, this is a ReplicaSet: the Deployment controller never creates
+// Pods directly, it delegates to the ReplicaSet it owns, and pod-creation
+// rejections (quota exhaustion, a missing ServiceAccount) surface as events
+// on that ReplicaSet. For StatefulSet, there is no intermediate object: the
+// StatefulSet controller creates Pods directly, so its own FailedCreate
+// events land on the StatefulSet itself — the source IS the workload being
+// watched, not a separate object to look up.
+type PodCreationSource struct {
+	Kind      string
+	Namespace string
+	Name      string
+	UID       types.UID
+}
 
 // LogTailer retrieves the last log lines from the previous container or init
 // container, used as additional evidence for repeated failures. It never
@@ -63,12 +78,14 @@ type Target struct {
 	// Pods are the workload's current pods, already filtered by label
 	// selector by the caller.
 	Pods []corev1.Pod
-	// ReplicaSets are the ReplicaSets owned by the observed Deployment,
-	// required only by the Quota Diagnoser (quota exhaustion events live
-	// on the ReplicaSet, not the Pod: the pod never exists).
-	ReplicaSets []appsv1.ReplicaSet
+	// PodCreationSources are the objects whose FailedCreate events explain
+	// pod-creation rejections, required only by the Quota Diagnoser (quota
+	// exhaustion and similar admission rejections live on this object, not
+	// the Pod: the pod never exists). See PodCreationSource.
+	PodCreationSources []PodCreationSource
 	// EventsByUID indexes namespace Events by the UID of the involved
-	// object (Pod or ReplicaSet). See
+	// object (Pod, or the relevant PodCreationSource: a ReplicaSet for
+	// Deployment, the StatefulSet itself for StatefulSet). See
 	// GroupEventsByInvolvedObject.
 	EventsByUID map[types.UID][]corev1.Event
 	// LogTailer may be nil: no additional log evidence; classification
@@ -119,6 +136,7 @@ func registeredDiagnosers() []Diagnoser {
 		Quota{},
 		ProgressDeadline{},
 		Paused{},
+		StatefulSetUpdate{},
 	}
 }
 
@@ -141,9 +159,10 @@ func RunDiagnosis(ctx context.Context, target Target) ([]Result, error) {
 }
 
 // GroupEventsByInvolvedObject indexes Events by the UID of the involved
-// object (Pod or ReplicaSet), so each Diagnoser accesses relevant events
-// with a lookup instead of scanning the namespace's entire Event list for
-// every pod.
+// object (Pod, or a PodCreationSource: a ReplicaSet for Deployment, the
+// StatefulSet itself for StatefulSet), so each Diagnoser accesses relevant
+// events with a lookup instead of scanning the namespace's entire Event list
+// for every pod.
 func GroupEventsByInvolvedObject(events []corev1.Event) map[types.UID][]corev1.Event {
 	grouped := make(map[types.UID][]corev1.Event)
 	for _, e := range events {

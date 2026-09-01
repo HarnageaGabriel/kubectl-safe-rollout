@@ -39,6 +39,15 @@ func (Paused) ID() string { return PausedDiagnoserID }
 
 // Diagnose implements Diagnoser.
 func (Paused) Diagnose(_ context.Context, target Target) (Result, error) {
+	if target.Workload.Kind() == "StatefulSet" {
+		// StatefulSet simply has no spec.paused field, full stop: unlike
+		// ProgressDeadlineExceeded's ok=false, Workload.Paused()'s bare
+		// false return here carries no ambiguity to preserve, but a silent
+		// empty Result would still look identical to "evaluated and found
+		// not paused" rather than "cannot evaluate this category for this
+		// kind" (see rules/output.md on Skipped visibility).
+		return SkipResult(PausedDiagnoserID, "StatefulSet has no spec.paused field: this category cannot be evaluated for this kind"), nil
+	}
 	if !target.Workload.Paused() {
 		return Result{DiagnoserID: PausedDiagnoserID}, nil
 	}

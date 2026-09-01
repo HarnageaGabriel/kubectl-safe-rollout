@@ -15,6 +15,7 @@
 package diagnose_test
 
 import (
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -49,6 +50,30 @@ func TestPaused_SpecPausedTrue_HighFinding(t *testing.T) {
 	}
 	if len(res.Findings[0].Remediation.Commands) != 0 {
 		t.Error("resuming is a real state change, not a read-only command: Commands must stay empty")
+	}
+}
+
+// StatefulSet has no spec.paused field at all: watch must say so explicitly
+// (Skipped=true) rather than silently reporting no Finding, which would be
+// indistinguishable from "evaluated and found not paused".
+func TestPaused_StatefulSet_Skipped(t *testing.T) {
+	s := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: testNamespace},
+	}
+	target := diagnose.Target{Namespace: testNamespace, Workload: workload.FromStatefulSet(s)}
+
+	res, err := diagnose.Paused{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if !res.Skipped {
+		t.Fatal("StatefulSet has no pause mechanism: this must be Skipped, not silently empty")
+	}
+	if !strings.Contains(res.SkipReason, "StatefulSet") {
+		t.Errorf("SkipReason must name the kind, got %q", res.SkipReason)
+	}
+	if len(res.Findings) != 0 {
+		t.Fatalf("a Skipped result must carry no Findings, got %+v", res.Findings)
 	}
 }
 

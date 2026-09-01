@@ -66,8 +66,8 @@ const restartedRolloutStabilityWindow = 30 * time.Second
 // window applies only when EVERY Finding in the tick is Undetermined.
 const undeterminedGraceWindow = 3 * time.Second
 
-// gracePollInterval is how often to reread Deployment/ReplicaSet/Event
-// during undeterminedGraceWindow. It is the only declared exception to this
+// gracePollInterval is how often to reread the controller object/pod-creation
+// source/Event during undeterminedGraceWindow. It is the only declared exception to this
 // file's "push-driven, not interval-based" principle (see
 // docs/watch-vs-polling.md): narrow in scope (active only while a cause is
 // ambiguous) and time-limited (never beyond undeterminedGraceWindow), not a
@@ -138,21 +138,139 @@ type Outcome struct {
 	Results   []Result
 }
 
+// controllerObserver abstracts the differences between the two controller
+// kinds the watch loop supports, Deployment and StatefulSet, so
+// watchFromCurrentState/evaluateTick do not hardcode API calls for one kind.
+// Built for exactly these two; do not add speculative hooks for kinds this
+// project does not support yet (see workload.Workload's own doc comment).
+type controllerObserver interface {
+	// get reads the live controller object and returns it wrapped as a
+	// fresh workload.Workload plus its current ResourceVersion. Called once
+	// before starting the RetryWatcher (for its initial resourceVersion) and
+	// once per tick from evaluateTick. A read error here is always fatal to
+	// observation, matching evaluateTick's existing contract: there is no
+	// useful way to continue if the controller object can no longer be
+	// read.
+	get(ctx context.Context, namespace, name string) (wl workload.Workload, resourceVersion string, err error)
+	// listWatch builds the ListWatch used to start the RetryWatcher on the
+	// controller object itself (Pods are handled separately, identically
+	// for both kinds).
+	listWatch(namespace, name string) *cache.ListWatch
+	// podCreationSources returns this tick's PodCreationSource entries (see
+	// PodCreationSource). A read error here degrades to Result.Skipped on
+	// the Quota Diagnoser in evaluateTick, matching the existing behavior
+	// for listOwnedReplicaSets: a narrow read error must not abort the
+	// whole tick.
+	podCreationSources(ctx context.Context, wl workload.Workload) ([]PodCreationSource, error)
+}
+
+// newControllerObserver selects the controllerObserver implementation for
+// kind, mirroring the switch-on-kind idiom already used by
+// kube.ResolveWorkload for the same two supported kinds.
+func newControllerObserver(client kubernetes.Interface, kind string) (controllerObserver, error) {
+	switch kind {
+	case "Deployment":
+		return deploymentObserver{client: client}, nil
+	case "StatefulSet":
+		return statefulSetObserver{client: client}, nil
+	default:
+		return nil, fmt.Errorf("watch does not support kind %q", kind)
+	}
+}
+
+type deploymentObserver struct {
+	client kubernetes.Interface
+}
+
+func (o deploymentObserver) get(ctx context.Context, namespace, name string) (workload.Workload, string, error) {
+	d, err := o.client.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, "", err
+	}
+	return workload.FromDeployment(d), d.ResourceVersion, nil
+}
+
+func (o deploymentObserver) listWatch(namespace, name string) *cache.ListWatch {
+	return &cache.ListWatch{
+		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
+			options.FieldSelector = fields.OneTermEqualSelector("metadata.name", name).String()
+			return o.client.AppsV1().Deployments(namespace).Watch(ctx, options)
+		},
+		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+			options.FieldSelector = fields.OneTermEqualSelector("metadata.name", name).String()
+			return o.client.AppsV1().Deployments(namespace).List(ctx, options)
+		},
+	}
+}
+
+// podCreationSources wraps the Deployment's owned ReplicaSets (see
+// listOwnedReplicaSets): the Deployment controller never creates Pods
+// directly, so pod-creation rejections surface as events on the ReplicaSet.
+func (o deploymentObserver) podCreationSources(ctx context.Context, wl workload.Workload) ([]PodCreationSource, error) {
+	replicaSets, err := listOwnedReplicaSets(ctx, o.client, wl.Namespace(), wl)
+	if err != nil {
+		return nil, err
+	}
+	sources := make([]PodCreationSource, 0, len(replicaSets))
+	for _, rs := range replicaSets {
+		sources = append(sources, PodCreationSource{Kind: "ReplicaSet", Namespace: rs.Namespace, Name: rs.Name, UID: rs.UID})
+	}
+	return sources, nil
+}
+
+type statefulSetObserver struct {
+	client kubernetes.Interface
+}
+
+func (o statefulSetObserver) get(ctx context.Context, namespace, name string) (workload.Workload, string, error) {
+	s, err := o.client.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, "", err
+	}
+	return workload.FromStatefulSet(s), s.ResourceVersion, nil
+}
+
+func (o statefulSetObserver) listWatch(namespace, name string) *cache.ListWatch {
+	return &cache.ListWatch{
+		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
+			options.FieldSelector = fields.OneTermEqualSelector("metadata.name", name).String()
+			return o.client.AppsV1().StatefulSets(namespace).Watch(ctx, options)
+		},
+		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+			options.FieldSelector = fields.OneTermEqualSelector("metadata.name", name).String()
+			return o.client.AppsV1().StatefulSets(namespace).List(ctx, options)
+		},
+	}
+}
+
+// podCreationSources returns a single entry that IS the StatefulSet itself:
+// its controller creates Pods directly (no intermediate ReplicaSet), so its
+// own FailedCreate events already carry the evidence Quota needs. No API
+// call needed: wl already reflects the object read this tick by get.
+func (o statefulSetObserver) podCreationSources(_ context.Context, wl workload.Workload) ([]PodCreationSource, error) {
+	return []PodCreationSource{{Kind: "StatefulSet", Namespace: wl.Namespace(), Name: wl.Name(), UID: wl.UID()}}, nil
+}
+
 // Watch observes workload pods through the Watch API (client-go/tools/
 // watch.RetryWatcher, with automatic re-list on reconnection) until the
 // rollout succeeds or a diagnosable cause of stall/failure emerges. The
 // reasons for choosing the Watch API over polling are documented in
 // docs/watch-vs-polling.md, including the stated tradeoff of rereading
-// Events and ReplicaSets on each tick instead of watching separate streams.
+// Events and pod-creation sources on each tick instead of watching separate
+// streams.
 func Watch(ctx context.Context, wt WatchTarget) (Outcome, error) {
 	podSelector, err := wt.Workload.PodSelector()
 	if err != nil {
 		return Outcome{}, fmt.Errorf("invalid pod selector for %s/%s: %w", wt.Workload.Kind(), wt.Workload.Name(), err)
 	}
 	selector := podSelector.String()
+	observer, err := newControllerObserver(wt.Client, wt.Workload.Kind())
+	if err != nil {
+		return Outcome{}, err
+	}
 	restarts := newRestartObservations()
 	for {
-		outcome, relist, err := watchFromCurrentState(ctx, wt, selector, restarts)
+		outcome, relist, err := watchFromCurrentState(ctx, wt, selector, observer, restarts)
 		if relist {
 			continue
 		}
@@ -164,7 +282,7 @@ func Watch(ctx context.Context, wt WatchTarget) (Outcome, error) {
 // then watches from that resourceVersion. relist=true indicates that the RV
 // expired (HTTP 410): the caller starts again from a new List instead of
 // losing events or pretending the stream is still reliable.
-func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string, restarts *restartObservations) (Outcome, bool, error) {
+func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string, observer controllerObserver, restarts *restartObservations) (Outcome, bool, error) {
 	initial, err := wt.Client.CoreV1().Pods(wt.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
 	if err != nil {
 		return Outcome{}, false, fmt.Errorf("initial pod list for %s/%s: %w", wt.Workload.Kind(), wt.Workload.Name(), err)
@@ -238,7 +356,7 @@ func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string,
 	}
 	handleTick := func() (Outcome, bool, error) {
 		restarts.observe(pods)
-		tr, err := evaluateTick(ctx, wt, pods)
+		tr, err := evaluateTick(ctx, wt, observer, pods)
 		if err != nil {
 			return Outcome{}, true, err
 		}
@@ -257,7 +375,7 @@ func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string,
 				stopGrace()
 				return pendingUndetermined, true, nil
 			}
-		case tr.failureFound && isPausedOnly(tr.outcome):
+		case tr.failureFound && isSettleWindowOnly(tr.outcome):
 			stopGrace()
 			pendingPausedOnly = tr.outcome
 			switch {
@@ -300,7 +418,7 @@ func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string,
 		// RolloutComplete can remain true while a liveness probe repeatedly
 		// kills a container. The pod may become Ready again during the
 		// kubelet's restart backoff, so an increased restart count invalidates
-		// the current quiet period even when the Deployment still looks
+		// the current quiet period even when the controller still looks
 		// complete. Counts are relative to the window opening: preexisting
 		// restart history must not make success impossible.
 		restartedDuringWindow := stability != nil && stabilityRestartCounts.increased(pods)
@@ -331,9 +449,9 @@ func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string,
 	if outcome, done, err := handleTick(); done {
 		return outcome, false, err
 	}
-	deployment, err := wt.Client.AppsV1().Deployments(wt.Namespace).Get(ctx, wt.Workload.Name(), metav1.GetOptions{})
+	_, controllerRV, err := observer.get(ctx, wt.Namespace, wt.Workload.Name())
 	if err != nil {
-		return Outcome{}, false, fmt.Errorf("initial read of Deployment/%s for watch: %w", wt.Workload.Name(), err)
+		return Outcome{}, false, fmt.Errorf("initial read of %s/%s for watch: %w", wt.Workload.Kind(), wt.Workload.Name(), err)
 	}
 
 	lw := &cache.ListWatch{
@@ -352,21 +470,12 @@ func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string,
 	}
 	defer rw.Stop()
 
-	deploymentLW := &cache.ListWatch{
-		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
-			options.FieldSelector = fields.OneTermEqualSelector("metadata.name", wt.Workload.Name()).String()
-			return wt.Client.AppsV1().Deployments(wt.Namespace).Watch(ctx, options)
-		},
-		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
-			options.FieldSelector = fields.OneTermEqualSelector("metadata.name", wt.Workload.Name()).String()
-			return wt.Client.AppsV1().Deployments(wt.Namespace).List(ctx, options)
-		},
-	}
-	deploymentRW, err := watchtools.NewRetryWatcherWithContext(ctx, deployment.ResourceVersion, deploymentLW)
+	controllerLW := observer.listWatch(wt.Namespace, wt.Workload.Name())
+	controllerRW, err := watchtools.NewRetryWatcherWithContext(ctx, controllerRV, controllerLW)
 	if err != nil {
-		return Outcome{}, false, fmt.Errorf("starting watch on Deployment/%s: %w", wt.Workload.Name(), err)
+		return Outcome{}, false, fmt.Errorf("starting watch on %s/%s: %w", wt.Workload.Kind(), wt.Workload.Name(), err)
 	}
-	defer deploymentRW.Stop()
+	defer controllerRW.Stop()
 
 	for {
 		select {
@@ -393,15 +502,15 @@ func watchFromCurrentState(ctx context.Context, wt WatchTarget, selector string,
 				return outcome, false, err
 			}
 		case ev, ok := <-rw.ResultChan():
-			if relist, err := checkWatchEvent(ctx, ev, ok, "pod", wt.Workload.Name()); relist || err != nil {
+			if relist, err := checkWatchEvent(ctx, ev, ok, "pod", wt.Workload.Kind(), wt.Workload.Name()); relist || err != nil {
 				return Outcome{}, relist, err
 			}
 			applyPodEvent(pods, ev)
 			if outcome, done, err := handleTick(); done {
 				return outcome, false, err
 			}
-		case ev, ok := <-deploymentRW.ResultChan():
-			if relist, err := checkWatchEvent(ctx, ev, ok, "Deployment", wt.Workload.Name()); relist || err != nil {
+		case ev, ok := <-controllerRW.ResultChan():
+			if relist, err := checkWatchEvent(ctx, ev, ok, wt.Workload.Kind(), wt.Workload.Kind(), wt.Workload.Name()); relist || err != nil {
 				return Outcome{}, relist, err
 			}
 			if outcome, done, err := handleTick(); done {
@@ -429,18 +538,30 @@ func allUndetermined(o Outcome) bool {
 	return any
 }
 
-// isPausedOnly reports whether every Finding in the Outcome came from the
-// Paused Diagnoser. Used to decide whether a tick's outcome is worth a
-// second look (see pausedSettleWindow) before finalizing: Paused fires with
-// no pod symptom at all, so it can preempt an unrelated, already-true
-// problem (a crash loop, a stuck image pull) that simply had not been
-// captured by this exact tick's snapshot yet.
-func isPausedOnly(o Outcome) bool {
+// settleWindowDiagnoserIDs are the diagnosers whose Finding can fire from a
+// spec field alone, with no pod-level symptom required at all: Paused reads
+// spec.paused, and StatefulSetUpdate reads spec.updateStrategy plus
+// Status.UpdateRevision/CurrentRevision. Each shares the exact risk that
+// justified pausedSettleWindow in the first place (see its comment): on the
+// very first tick, any of them can win over a pod-level cause (a preexisting
+// crash loop, a stuck image pull) that simply has not surfaced in this
+// tick's snapshot yet, because a spec-only signal needs no pod state to be
+// visible while the pod-level cause might only be observable for part of
+// the kubelet's own cycle.
+var settleWindowDiagnoserIDs = map[string]bool{
+	PausedDiagnoserID:            true,
+	StatefulSetUpdateDiagnoserID: true,
+}
+
+// isSettleWindowOnly reports whether every Finding in the Outcome came from
+// a Diagnoser in settleWindowDiagnoserIDs. Used to decide whether a tick's
+// outcome is worth a second look (see pausedSettleWindow) before finalizing.
+func isSettleWindowOnly(o Outcome) bool {
 	any := false
 	for _, res := range o.Results {
 		for range res.Findings {
 			any = true
-			if res.DiagnoserID != PausedDiagnoserID {
+			if !settleWindowDiagnoserIDs[res.DiagnoserID] {
 				return false
 			}
 		}
@@ -448,12 +569,12 @@ func isPausedOnly(o Outcome) bool {
 	return any
 }
 
-func checkWatchEvent(ctx context.Context, event watch.Event, ok bool, resource, workloadName string) (bool, error) {
+func checkWatchEvent(ctx context.Context, event watch.Event, ok bool, streamLabel, kind, workloadName string) (bool, error) {
 	if !ok {
 		if ctx.Err() != nil {
 			return false, ctx.Err()
 		}
-		return false, fmt.Errorf("%s watch stream for Deployment/%s closed unexpectedly", resource, workloadName)
+		return false, fmt.Errorf("%s watch stream for %s/%s closed unexpectedly", streamLabel, kind, workloadName)
 	}
 	if event.Type != watch.Error {
 		return false, nil
@@ -462,7 +583,7 @@ func checkWatchEvent(ctx context.Context, event watch.Event, ok bool, resource, 
 	if apierrors.IsResourceExpired(watchErr) || apierrors.IsGone(watchErr) {
 		return true, nil
 	}
-	return false, fmt.Errorf("watch %s per Deployment/%s: %w", resource, workloadName, watchErr)
+	return false, fmt.Errorf("watch %s for %s/%s: %w", streamLabel, kind, workloadName, watchErr)
 }
 
 func indexPods(items []corev1.Pod) map[types.UID]corev1.Pod {
@@ -566,27 +687,26 @@ type tick struct {
 	outcome      Outcome
 }
 
-// evaluateTick rereads workload state (Deployment, ReplicaSet, Event),
-// rebuilds a fresh Target, then classifies the current tick. It does not
-// decide on its own whether this is enough to stop observation:
-// RolloutComplete()==true must remain stable for rolloutStabilityWindow
-// (see handleTick in watchFromCurrentState) before becoming a definitive
-// success. An error here is always fatal to observation (there is no useful
-// way to continue if workload state can no longer be read), unlike narrow
-// read errors inside individual Diagnosers, which degrade instead of
-// propagating.
-func evaluateTick(ctx context.Context, wt WatchTarget, pods map[types.UID]corev1.Pod) (tick, error) {
-	d, err := wt.Client.AppsV1().Deployments(wt.Namespace).Get(ctx, wt.Workload.Name(), metav1.GetOptions{})
+// evaluateTick rereads workload state (the controller object, its
+// pod-creation sources, Events), rebuilds a fresh Target, then classifies
+// the current tick. It does not decide on its own whether this is enough to
+// stop observation: RolloutComplete()==true must remain stable for
+// rolloutStabilityWindow (see handleTick in watchFromCurrentState) before
+// becoming a definitive success. An error here is always fatal to
+// observation (there is no useful way to continue if workload state can no
+// longer be read), unlike narrow read errors inside individual Diagnosers,
+// which degrade instead of propagating.
+func evaluateTick(ctx context.Context, wt WatchTarget, observer controllerObserver, pods map[types.UID]corev1.Pod) (tick, error) {
+	wl, _, err := observer.get(ctx, wt.Namespace, wt.Workload.Name())
 	if err != nil {
 		return tick{}, fmt.Errorf("reading %s/%s: %w", wt.Workload.Kind(), wt.Workload.Name(), err)
 	}
-	wl := workload.FromDeployment(d)
 
 	var collectionResults []Result
-	replicaSets, err := listOwnedReplicaSets(ctx, wt, wl)
+	sources, err := observer.podCreationSources(ctx, wl)
 	if err != nil {
 		collectionResults = append(collectionResults, SkipResult(QuotaDiagnoserID, err.Error()))
-		replicaSets = nil
+		sources = nil
 	}
 	events, err := wt.Client.CoreV1().Events(wt.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -595,13 +715,13 @@ func evaluateTick(ctx context.Context, wt WatchTarget, pods map[types.UID]corev1
 	}
 
 	target := Target{
-		Namespace:   wt.Namespace,
-		Workload:    wl,
-		Client:      wt.Client,
-		Pods:        podSlice(pods),
-		ReplicaSets: replicaSets,
-		EventsByUID: GroupEventsByInvolvedObject(events.Items),
-		LogTailer:   wt.LogTailer,
+		Namespace:          wt.Namespace,
+		Workload:           wl,
+		Client:             wt.Client,
+		Pods:               podSlice(pods),
+		PodCreationSources: sources,
+		EventsByUID:        GroupEventsByInvolvedObject(events.Items),
+		LogTailer:          wt.LogTailer,
 	}
 
 	results, err := RunDiagnosis(ctx, target)
@@ -650,15 +770,15 @@ func replaceSkippedResults(results, skipped []Result) []Result {
 // share the same labels as the current pod template (Kubernetes reuses them
 // when the template does not change labels), but only the OwnerReference
 // reliably identifies "owned by this Deployment".
-func listOwnedReplicaSets(ctx context.Context, wt WatchTarget, wl workload.Workload) ([]appsv1.ReplicaSet, error) {
+func listOwnedReplicaSets(ctx context.Context, client kubernetes.Interface, namespace string, wl workload.Workload) ([]appsv1.ReplicaSet, error) {
 	podSelector, err := wl.PodSelector()
 	if err != nil {
 		return nil, fmt.Errorf("invalid pod selector for %s/%s: %w", wl.Kind(), wl.Name(), err)
 	}
 	selector := podSelector.String()
-	list, err := wt.Client.AppsV1().ReplicaSets(wt.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	list, err := client.AppsV1().ReplicaSets(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
 	if err != nil {
-		return nil, fmt.Errorf("listing ReplicaSets for %s/%s: %w", wt.Namespace, wl.Name(), err)
+		return nil, fmt.Errorf("listing ReplicaSets for %s/%s: %w", namespace, wl.Name(), err)
 	}
 	owned := make([]appsv1.ReplicaSet, 0, len(list.Items))
 	for _, rs := range list.Items {

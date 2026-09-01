@@ -128,25 +128,30 @@ const (
 	// recognizable FailedScheduling event or referenced unbound PVC.
 	CausePendingUndetermined CauseID = "pending-undetermined"
 
-	// CauseQuotaExceeded means the ReplicaSet cannot create pods because
-	// the ResourceQuota admission plugin rejects the request. Not
-	// observable on Pods (they never exist): observable only as a
-	// Reason=="FailedCreate" event on the ReplicaSet.
+	// CauseQuotaExceeded means the object that owns pod creation (a
+	// ReplicaSet for Deployment, the StatefulSet itself for StatefulSet;
+	// see PodCreationSource) cannot create pods because the ResourceQuota
+	// admission plugin rejects the request. Not observable on Pods (they
+	// never exist): observable only as a Reason=="FailedCreate" event on
+	// that object.
 	CauseQuotaExceeded CauseID = "quota-exceeded"
-	// CauseQuotaUndetermined means the ReplicaSet has a FailedCreate event
-	// but the message does not mention an exceeded quota (it could be an
-	// admission webhook or another rejection): the failure to create pods
-	// is still a real signal to report, but the specific cause is not.
+	// CauseQuotaUndetermined means the object that owns pod creation (a
+	// ReplicaSet for Deployment, the StatefulSet itself for StatefulSet)
+	// has a FailedCreate event but the message does not mention an
+	// exceeded quota (it could be an admission webhook or another
+	// rejection): the failure to create pods is still a real signal to
+	// report, but the specific cause is not.
 	CauseQuotaUndetermined CauseID = "quota-undetermined"
 
-	// CauseServiceAccountMissing means a ReplicaSet cannot create pods
-	// because the pod template names a ServiceAccount that does not exist
-	// in the namespace. Same signal source as the quota causes above (a
-	// Reason=="FailedCreate" event on the ReplicaSet, the pod never
-	// exists), but a distinct and fully deterministic cause: found on kind
-	// via a Deployment referencing a ServiceAccount that had never been
-	// created, which the ResourceQuota diagnoser was mislabeling as
-	// "quota-undetermined" before this cause existed.
+	// CauseServiceAccountMissing means the object that owns pod creation (a
+	// ReplicaSet for Deployment, the StatefulSet itself for StatefulSet)
+	// cannot create pods because the pod template names a ServiceAccount
+	// that does not exist in the namespace. Same signal source as the
+	// quota causes above (a Reason=="FailedCreate" event on that object,
+	// the pod never exists), but a distinct and fully deterministic cause:
+	// found on kind via a Deployment referencing a ServiceAccount that had
+	// never been created, which the ResourceQuota diagnoser was
+	// mislabeling as "quota-undetermined" before this cause existed.
 	CauseServiceAccountMissing CauseID = "serviceaccount-missing"
 
 	// CauseProgressDeadlineExceeded means the Deployment controller has
@@ -164,4 +169,30 @@ const (
 	// CauseProgressDeadlineExceeded, there is no ambiguity to resolve: the
 	// boolean field itself is the cause, not a text pattern to interpret.
 	CauseRolloutPaused CauseID = "rollout-paused"
+
+	// CauseStatefulSetUpdateOnDelete means a StatefulSet uses the OnDelete
+	// update strategy and has a pending update (Status.UpdateRevision
+	// differs from Status.CurrentRevision). The controller sets
+	// UpdateRevision as soon as the pod template changes, but under
+	// OnDelete it never creates, updates, or deletes a Pod on its own:
+	// nothing happens until the operator deletes the pods that must move to
+	// the new revision, one at a time. Unlike CauseRolloutPaused, this is
+	// not a controller-wide freeze triggered by a boolean the operator set
+	// deliberately for this rollout; it is the standing, documented
+	// behavior of a strategy an operator may have chosen for entirely
+	// unrelated reasons (e.g. to control the exact timing of each pod's
+	// replacement themselves).
+	CauseStatefulSetUpdateOnDelete CauseID = "statefulset-update-ondelete"
+	// CauseStatefulSetPartitionBlocked means a StatefulSet's RollingUpdate
+	// strategy has spec.updateStrategy.rollingUpdate.partition set to a
+	// value greater than or equal to the desired replica count while a
+	// update is pending (Status.UpdateRevision differs from
+	// Status.CurrentRevision): the controller only updates pods whose
+	// ordinal is greater than or equal to partition, so a partition at or
+	// above the replica count makes every pod ineligible and the pending
+	// revision mathematically unreachable. 0 < partition < replicas is the
+	// standard canary idiom (only the highest-ordinal pods update) and is
+	// deliberately excluded: that is healthy, intentional throttling, not a
+	// stuck rollout.
+	CauseStatefulSetPartitionBlocked CauseID = "statefulset-partition-blocked"
 )

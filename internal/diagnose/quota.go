@@ -17,6 +17,7 @@ package diagnose
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/diagnose/pattern"
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/model"
@@ -26,14 +27,14 @@ import (
 // Result.DiagnoserID.
 const QuotaDiagnoserID = "quota"
 
-// Quota classifies pod creation failures reported through the ReplicaSet's
-// Reason=="FailedCreate" event: quota exhaustion is the most common cause,
-// but not the only one an admission plugin can produce there, so this
-// Diagnoser also recognizes a missing ServiceAccount rather than leaving it
-// in the undetermined bucket alongside genuinely unrecognized rejections. It
-// is the only Diagnoser that does not operate on the workload's Pods: when
-// pod creation itself is rejected, the Pod never exists, so there is no Pod
-// to inspect.
+// Quota classifies pod creation failures reported through the
+// PodCreationSource's Reason=="FailedCreate" event: quota exhaustion is the
+// most common cause, but not the only one an admission plugin can produce
+// there, so this Diagnoser also recognizes a missing ServiceAccount rather
+// than leaving it in the undetermined bucket alongside genuinely
+// unrecognized rejections. It is the only Diagnoser that does not operate on
+// the workload's Pods: when pod creation itself is rejected, the Pod never
+// exists, so there is no Pod to inspect.
 type Quota struct{}
 
 // ID implements Diagnoser.
@@ -61,24 +62,29 @@ func capEvidence(evidence []string) []string {
 
 // Diagnose implements Diagnoser.
 //
-// One rejected pod creation produces one FailedCreate event, so a rollout
-// of N replicas blocked by quota produces N events describing a single
-// failure. They are collapsed into one Finding per cause with the
-// individual messages kept as separate Evidence lines: the per-pod
+// One rejected pod creation produces one FailedCreate event. For
+// Deployment, this means a rollout of N replicas blocked by quota produces N
+// events describing a single failure, since the ReplicaSet controller
+// retries once per missing replica. StatefulSet's cadence differs: the
+// StatefulSet controller creates pods one ordinal at a time, so a blocked
+// rollout typically produces events one at a time as well, not N at once —
+// the same collapsing logic still applies, it simply has less to collapse
+// on a given tick. Events are grouped into one Finding per cause per source
+// with the individual messages kept as separate Evidence lines: the per-pod
 // messages are worth reading (they name which pods were rejected) but
-// printing the same cause and the same remediation N times is noise
-// exactly where the output is read under pressure. This grouping is not
-// generalised to the other Diagnosers, which iterate over Pods: there,
-// two Findings mean two genuinely different objects failing.
+// printing the same cause and the same remediation N times is noise exactly
+// where the output is read under pressure. This grouping is not generalised
+// to the other Diagnosers, which iterate over Pods: there, two Findings
+// mean two genuinely different objects failing.
 func (d Quota) Diagnose(_ context.Context, target Target) (Result, error) {
 	var findings []model.Finding
-	for _, rs := range target.ReplicaSets {
-		resource := model.ResourceRef{Kind: "ReplicaSet", Namespace: rs.Namespace, Name: rs.Name}
+	for _, source := range target.PodCreationSources {
+		resource := model.ResourceRef{Kind: source.Kind, Namespace: source.Namespace, Name: source.Name}
 
 		var exceeded, undetermined []string
 		var missingSA string
 		var missingSAEvidence []string
-		for _, e := range target.EventsByUID[rs.UID] {
+		for _, e := range target.EventsByUID[source.UID] {
 			if e.Reason != "FailedCreate" {
 				continue
 			}
@@ -102,7 +108,7 @@ func (d Quota) Diagnose(_ context.Context, target Target) (Result, error) {
 				Evidence: capEvidence(exceeded),
 				Remediation: model.Remediation{
 					Summary:          "increase the namespace ResourceQuota, reduce workload requests, or free capacity by terminating other workloads; the correct choice depends on what the namespace hosts and who has authority over it",
-					Commands:         []string{fmt.Sprintf("kubectl describe resourcequota -n %s", rs.Namespace)},
+					Commands:         []string{fmt.Sprintf("kubectl describe resourcequota -n %s", source.Namespace)},
 					ContextDependent: true,
 				},
 				Resource: resource,
@@ -113,11 +119,11 @@ func (d Quota) Diagnose(_ context.Context, target Target) (Result, error) {
 			findings = append(findings, model.Finding{
 				CheckID:  string(CauseServiceAccountMissing),
 				Severity: model.SeverityHigh,
-				Cause:    fmt.Sprintf("%s cannot create pods: the pod template references ServiceAccount %q, which does not exist in namespace %q", resource, missingSA, rs.Namespace),
+				Cause:    fmt.Sprintf("%s cannot create pods: the pod template references ServiceAccount %q, which does not exist in namespace %q", resource, missingSA, source.Namespace),
 				Evidence: capEvidence(missingSAEvidence),
 				Remediation: model.Remediation{
-					Summary:          fmt.Sprintf("verify whether ServiceAccount %q should exist in namespace %q, or the pod template should reference a different one", missingSA, rs.Namespace),
-					Commands:         []string{fmt.Sprintf("kubectl get serviceaccount %s -n %s", missingSA, rs.Namespace)},
+					Summary:          fmt.Sprintf("verify whether ServiceAccount %q should exist in namespace %q, or the pod template should reference a different one", missingSA, source.Namespace),
+					Commands:         []string{fmt.Sprintf("kubectl get serviceaccount %s -n %s", missingSA, source.Namespace)},
 					ContextDependent: true,
 				},
 				Resource: resource,
@@ -132,7 +138,7 @@ func (d Quota) Diagnose(_ context.Context, target Target) (Result, error) {
 				Evidence: capEvidence(undetermined),
 				Remediation: model.Remediation{
 					Summary:          "read the full FailedCreate event message: it may be an admission webhook or another constraint",
-					Commands:         []string{fmt.Sprintf("kubectl describe replicaset %s -n %s", rs.Name, rs.Namespace)},
+					Commands:         []string{fmt.Sprintf("kubectl describe %s %s -n %s", strings.ToLower(source.Kind), source.Name, source.Namespace)},
 					ContextDependent: true,
 				},
 				Resource:     resource,

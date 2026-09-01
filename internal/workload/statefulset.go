@@ -197,3 +197,9 @@ func (w *statefulSetWorkload) ProgressDeadlineExceeded() (message string, ok boo
 func (w *statefulSetWorkload) Paused() bool {
 	return false
 }
+
+// PendingRevisionUpdate implements Workload: the two revision hashes come
+// straight from Status, no derivation involved.
+func (w *statefulSetWorkload) PendingRevisionUpdate() (updateRevision, currentRevision string, ok bool) {
+	return w.s.Status.UpdateRevision, w.s.Status.CurrentRevision, true
+}

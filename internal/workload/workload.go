@@ -133,6 +133,19 @@ type Workload interface {
 	// would wait indefinitely on a paused rollout with no way to explain
 	// why.
 	Paused() bool
+	// PendingRevisionUpdate reports the controller's desired and current
+	// revision hashes, and whether this concept applies to this controller
+	// type at all. It exists for StatefulSet's OnDelete strategy: the
+	// controller sets status.updateRevision as soon as the pod template
+	// changes but, under OnDelete, never acts on a Pod itself (see
+	// UpdateStrategy's OnDelete constant) — updateRevision != currentRevision
+	// is the only available signal that an update is pending, since nothing
+	// else in Status changes. ok=false means "not applicable to this
+	// controller type" (always the case for Deployment, whose Status carries
+	// no revision-hash pair), never "definitely no pending update" —
+	// matching the convention already established by
+	// ProgressDeadlineExceeded/Paused.
+	PendingRevisionUpdate() (updateRevision, currentRevision string, ok bool)
 }
 
 type deploymentWorkload struct {
@@ -282,4 +295,11 @@ func (w *deploymentWorkload) ProgressDeadlineExceeded() (message string, ok bool
 // Paused implements Workload.
 func (w *deploymentWorkload) Paused() bool {
 	return w.d.Spec.Paused
+}
+
+// PendingRevisionUpdate implements Workload. Deployment's Status carries no
+// revision-hash pair comparable to StatefulSet's UpdateRevision/
+// CurrentRevision, so this is never applicable.
+func (w *deploymentWorkload) PendingRevisionUpdate() (updateRevision, currentRevision string, ok bool) {
+	return "", "", false
 }
