@@ -54,10 +54,10 @@ func TestWatchE2E_NonexistentImageTag(t *testing.T) {
 	podSpec := corev1.PodSpec{
 		Containers: []corev1.Container{{
 			Name:  "app",
-			Image: "busybox:questo-tag-non-esiste-v99",
+			Image: "busybox:this-tag-does-not-exist-v99",
 		}},
 	}
-	d := deployWorkload(t, client, ns, "pull-tag-inesistente", 1, podSpec, nil)
+	d := deployWorkload(t, client, ns, "pull-nonexistent-tag", 1, podSpec, nil)
 
 	watchAndExpectCause(t, client, ns, d, diagnose.CauseImagePullTagNotFound, 2*time.Minute)
 }
@@ -93,7 +93,7 @@ func TestWatchE2E_MissingRegistryCredentials(t *testing.T) {
 	podSpec := corev1.PodSpec{
 		Containers: []corev1.Container{{
 			Name:  "app",
-			Image: "docker.io/kubectlsaferolloute2e/repo-privata-inesistente:v1",
+			Image: "docker.io/kubectlsaferolloute2e/nonexistent-private-repo:v1",
 		}},
 	}
 	d := deployWorkload(t, client, ns, "pull-credenziali-mancanti", 1, podSpec, nil)
