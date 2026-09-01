@@ -13,10 +13,10 @@
 // limitations under the License.
 
 // Package workload abstracts differences among Kubernetes workload types
-// (Deployment, and StatefulSet in the future) behind a single interface.
-// Checks in internal/check operate on Workload, not concrete types from
-// k8s.io/api/apps/v1: this prevents every new check from having to handle
-// a switch on Deployment/StatefulSet/DaemonSet.
+// (Deployment and StatefulSet; DaemonSet remains unsupported) behind a
+// single interface. Checks in internal/check operate on Workload, not
+// concrete types from k8s.io/api/apps/v1: this prevents every new check from
+// having to handle a switch on Deployment/StatefulSet/DaemonSet.
 package workload
 
 import (
@@ -37,13 +37,22 @@ type UpdateStrategy struct {
 	Type           string
 	MaxUnavailable *intstr.IntOrString
 	MaxSurge       *intstr.IntOrString
+	// Partition is meaningful only for StatefulSet's RollingUpdate strategy:
+	// the ordinal at which the update is partitioned (pods with an ordinal
+	// below Partition are left untouched by the rollout). nil for Deployment,
+	// and nil for a StatefulSet that does not set it explicitly — kept
+	// distinguishable from an explicit 0, the same convention already used
+	// for MaxUnavailable/MaxSurge.
+	Partition *int32
 }
 
 // Recreate and RollingUpdate replicate the appsv1 constants to avoid forcing
 // callers to import k8s.io/api/apps/v1 only to compare the strategy type.
+// OnDelete has no Deployment equivalent: it exists only for StatefulSet.
 const (
 	Recreate        = "Recreate"
 	RollingUpdate   = "RollingUpdate"
+	OnDelete        = "OnDelete"
 	defaultMaxUnav  = "25%"
 	defaultMaxSurge = "25%"
 )
