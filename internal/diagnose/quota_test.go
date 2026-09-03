@@ -32,6 +32,23 @@ func replicaSet(name string) appsv1.ReplicaSet {
 	}
 }
 
+// statefulSetSource is the PodCreationSource for a StatefulSet, which owns
+// pod creation directly (see PodCreationSource): unlike a Deployment, there
+// is no intermediate object, the source is the workload itself.
+var statefulSetSource = diagnose.PodCreationSource{Kind: "StatefulSet", Namespace: testNamespace, Name: "app", UID: "sts-uid"}
+
+// targetWithSources builds a diagnose.Target directly from
+// PodCreationSources, bypassing newTarget's ReplicaSet-shaped fixture path:
+// Quota.Diagnose does not read target.Client, so no fake clientset is
+// needed here.
+func targetWithSources(sources []diagnose.PodCreationSource, events []corev1.Event) diagnose.Target {
+	return diagnose.Target{
+		Namespace:          testNamespace,
+		PodCreationSources: sources,
+		EventsByUID:        diagnose.GroupEventsByInvolvedObject(events),
+	}
+}
+
 func TestQuota_Exceeded(t *testing.T) {
 	rs := []appsv1.ReplicaSet{replicaSet("app-abc123")}
 	events := []corev1.Event{
@@ -242,5 +259,76 @@ func TestQuota_QuotaAndMissingServiceAccount_ProduceTwoFindings(t *testing.T) {
 	}
 	if !byID[string(diagnose.CauseQuotaExceeded)] || !byID[string(diagnose.CauseServiceAccountMissing)] {
 		t.Errorf("expected both causes present, got %+v", res.Findings)
+	}
+}
+
+// StatefulSet has no ReplicaSet: its own FailedCreate events are the source
+// (see PodCreationSource). These three tests mirror the Deployment-path
+// ones above but through a StatefulSet PodCreationSource, confirming the
+// refactor from Target.ReplicaSets to Target.PodCreationSources did not
+// change Deployment behavior while genuinely supporting StatefulSet.
+
+func TestQuota_StatefulSetSource_Exceeded(t *testing.T) {
+	events := []corev1.Event{
+		event("sts-uid", "FailedCreate", `Error creating: pods "app-2" is forbidden: exceeded quota: compute-quota, requested: limits.cpu=1, used: limits.cpu=4, limited: limits.cpu=4`),
+	}
+	target := targetWithSources([]diagnose.PodCreationSource{statefulSetSource}, events)
+
+	res, err := diagnose.Quota{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if len(res.Findings) != 1 || res.Findings[0].CheckID != string(diagnose.CauseQuotaExceeded) {
+		t.Fatalf("expected 1 finding %q, got %+v", diagnose.CauseQuotaExceeded, res.Findings)
+	}
+	if res.Findings[0].Resource.Kind != "StatefulSet" {
+		t.Errorf("Resource.Kind = %q, expected StatefulSet: it owns pod creation directly, there is no ReplicaSet", res.Findings[0].Resource.Kind)
+	}
+}
+
+func TestQuota_StatefulSetSource_MissingServiceAccount(t *testing.T) {
+	events := []corev1.Event{
+		event("sts-uid", "FailedCreate", `Error creating: pods "app-2" is forbidden: error looking up service account demo/does-not-exist-sa: serviceaccount "does-not-exist-sa" not found`),
+	}
+	target := targetWithSources([]diagnose.PodCreationSource{statefulSetSource}, events)
+
+	res, err := diagnose.Quota{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if len(res.Findings) != 1 || res.Findings[0].CheckID != string(diagnose.CauseServiceAccountMissing) {
+		t.Fatalf("expected 1 finding %q, got %+v", diagnose.CauseServiceAccountMissing, res.Findings)
+	}
+	if res.Findings[0].Resource.Kind != "StatefulSet" {
+		t.Errorf("Resource.Kind = %q, expected StatefulSet", res.Findings[0].Resource.Kind)
+	}
+}
+
+// The undetermined remediation command must name the actual source kind:
+// printing "kubectl describe replicaset" for a StatefulSet-sourced finding
+// would point the operator at an object type that is not the real source.
+func TestQuota_StatefulSetSource_Undetermined_RemediationNamesStatefulSet(t *testing.T) {
+	events := []corev1.Event{
+		event("sts-uid", "FailedCreate", `Error creating: admission webhook "policy.example.com" denied the request: missing required label`),
+	}
+	target := targetWithSources([]diagnose.PodCreationSource{statefulSetSource}, events)
+
+	res, err := diagnose.Quota{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if len(res.Findings) != 1 || res.Findings[0].CheckID != string(diagnose.CauseQuotaUndetermined) {
+		t.Fatalf("expected 1 finding %q, got %+v", diagnose.CauseQuotaUndetermined, res.Findings)
+	}
+	f := res.Findings[0]
+	if len(f.Remediation.Commands) != 1 {
+		t.Fatalf("expected exactly 1 remediation command, got %+v", f.Remediation.Commands)
+	}
+	cmd := f.Remediation.Commands[0]
+	if !strings.Contains(cmd, "statefulset") {
+		t.Errorf("remediation command must name statefulset, got %q", cmd)
+	}
+	if strings.Contains(cmd, "replicaset") {
+		t.Errorf("remediation command must not name replicaset for a StatefulSet-sourced finding, got %q", cmd)
 	}
 }

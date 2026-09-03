@@ -43,6 +43,12 @@ const PVCExistsCheckID = "pvc-exists"
 // problem — flagging it would risk a false positive on a perfectly
 // healthy claim. Existence alone is the fact this check can state
 // without guessing.
+//
+// Out of scope: StatefulSet's spec.volumeClaimTemplates. That is a separate,
+// PVC-per-pod-per-ordinal mechanism this check does not read (it only reads
+// Workload.Volumes(), i.e. the pod template's volumes) — a StatefulSet whose
+// volumeClaimTemplates reference a missing StorageClass, or whose per-ordinal
+// PVCs are otherwise broken, will not be flagged here.
 type PVCExists struct{}
 
 // ID implements check.Check.

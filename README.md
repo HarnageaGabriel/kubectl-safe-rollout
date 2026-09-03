@@ -9,6 +9,8 @@ A `kubectl` plugin that shortens the time between "the deploy failed" and "I kno
 - `kubectl safe-rollout check <kind>/<name>` — pre-flight analysis of a live workload and the state of its namespace.
 - `kubectl safe-rollout watch <kind>/<name>` — watches a rollout through the Kubernetes Watch API and, when it fails or stalls, classifies the cause and proposes remediation based on the evidence it collected.
 
+`<kind>` accepts `deployment` or `statefulset` (and their usual short/plural aliases, e.g. `deploy`, `sts`). Both `check` and `watch` are e2e-verified for both kinds (see "Verified and not verified" below).
+
 Three properties are worth knowing before you install it:
 
 1. **It never modifies the cluster.** It is read-only and has no `--apply-fix` option.
@@ -163,6 +165,7 @@ A PodDisruptionBudget is enforced by the Eviction API—for example, during `kub
 - Pod creation rejected: `quota-exceeded`, `serviceaccount-missing` (the pod template references a ServiceAccount that does not exist), `quota-undetermined`.
 - Progress deadline: `progress-deadline-exceeded`.
 - Paused rollout: `rollout-paused`, reported immediately from `spec.paused` rather than waiting for a symptom that will never appear. Because it fires with no pod symptom at all, `watch` spends a short settle window (longer if a container has already restarted) checking for another, coexisting cause before finalizing — a rollout paused after it started crash-looping reports both, not just that it is paused.
+- StatefulSet update stuck (StatefulSet only): `statefulset-update-ondelete` (the `OnDelete` strategy has a pending update — `status.updateRevision` differs from `status.currentRevision` — but the controller never creates, updates, or deletes a Pod on its own until the operator deletes them one at a time) and `statefulset-partition-blocked` (a `RollingUpdate` `partition` at or above the replica count makes every pod ordinal ineligible for the pending update). Neither fires for the standard `0 < partition < replicas` canary idiom, which is deliberate, healthy throttling, not a stuck rollout.
 
 Each category has an `*-undetermined` variant for confirmed failures that lack enough evidence for a more specific cause. These IDs are stable: JSON output exposes them, and CI gates should key on them.
 
@@ -177,17 +180,20 @@ Each category has an `*-undetermined` variant for confirmed failures that lack e
 
 ## Verified and not verified
 
-Verified: 20 end-to-end scenarios on kind v0.32.0 with containerd 2.3.1, all passing against v1.36.1. 19 of them, including the `rollout-paused` scenario, have additionally been run in full against **three Kubernetes minor versions** — v1.36.1, v1.35.5 and v1.34.8 — and pass on each; the 20th (`serviceaccount-missing`) is newly added and, as of this writing, has not yet been re-verified across all three.
+Verified: 20 Deployment end-to-end scenarios on kind v0.32.0 with containerd 2.3.1, all passing against v1.36.1. 19 of them, including the `rollout-paused` scenario, have additionally been run in full against **three Kubernetes minor versions** — v1.36.1, v1.35.5 and v1.34.8 — and pass on each; the 20th (`serviceaccount-missing`) is newly added and, as of this writing, has not yet been re-verified across all three.
 
 Of those scenarios, 16 cover the classified causes, one is a slow-start regression that guards against readiness false positives by requiring a completed rollout with no finding at all, and one runs `check` as a deliberately restricted ServiceAccount to prove that a check which cannot read a resource degrades to a visible `SKIP` rather than failing the run or reporting a clean result.
 
 They run with `make test-e2e` against a real cluster, against real kubelet, scheduler and containerd event messages rather than fixtures. `make test-e2e-versions` repeats the suite across the three minors.
+
+StatefulSet support (`test/e2e/statefulset_test.go`, 6 scenarios: crashloop, an ordinary multi-replica ordered rolling update completing with no finding, OnDelete-with-pending-update, partition-blocked-update, the `0 < partition < replicas` canary idiom completing with no finding, and quota-exhausted with the finding correctly attributed to the StatefulSet itself) has been run once, end to end, on kind v0.33.0 with containerd 2.3.4 against Kubernetes v1.37.0 — all 6 pass, alongside the full 26-scenario suite with zero Deployment-path regression. `check statefulset/<name>` was also smoke-tested manually against a live StatefulSet. Not yet run across the three pinned minors above (v1.37.0 is newer than all of them) — only a single data point so far, unlike Deployment's three-minor coverage.
 
 Not verified:
 
 - CRI-O. Only containerd has been exercised, so the event-message patterns for other runtimes are unconfirmed. This is the largest remaining gap: the messages this tool matches are produced by the runtime, not by Kubernetes.
 - Reconnection after a real etcd compaction or HTTP 410 `resourceVersion` expiry. That path has only been exercised against a fake clientset.
 - API load and event correlation on large, busy namespaces.
+- StatefulSet across multiple Kubernetes minors, and StatefulSet's `RolloutComplete()` logic against `k8s.io/kubectl`'s actual vendored source (it replicates the publicly documented contract instead, since `k8s.io/kubectl` is not a dependency of this module — see the comment on `internal/workload/statefulset.go`'s `RolloutComplete`).
 
 This list exists because a diagnosis tool that overstates what it has tested is worse than one that reports less.
 

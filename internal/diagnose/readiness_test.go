@@ -126,6 +126,30 @@ func TestReadiness_ReadyAfterDeadline_NoFinding(t *testing.T) {
 	}
 }
 
+// Readiness depends entirely on ProgressDeadlineExceeded, which never fires
+// for StatefulSet: without an explicit Skip, this category would stay
+// permanently, silently empty for the entire kind, indistinguishable from
+// "evaluated every container and found none unready".
+func TestReadiness_StatefulSet_Skipped(t *testing.T) {
+	pod := podWith("app-1", "app-1-uid", corev1.PodRunning, runningContainer(false))
+	target := newTarget(t, []corev1.Pod{pod}, nil, nil)
+	target.Workload = workload.FromStatefulSet(&appsv1.StatefulSet{})
+
+	res, err := diagnose.Readiness{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if !res.Skipped {
+		t.Fatal("readiness classification depends on progress-deadline evaluation: this must be Skipped for StatefulSet")
+	}
+	if !strings.Contains(res.SkipReason, "progress-deadline") {
+		t.Errorf("SkipReason must name the missing mechanism, got %q", res.SkipReason)
+	}
+	if len(res.Findings) != 0 {
+		t.Fatalf("a Skipped result must carry no Findings, got %+v", res.Findings)
+	}
+}
+
 func TestReadiness_WaitingAfterDeadline_NoFinding(t *testing.T) {
 	status := corev1.ContainerStatus{
 		Name:  "app",

@@ -46,6 +46,14 @@ func (Readiness) ID() string { return ReadinessDiagnoserID }
 
 // Diagnose implements Diagnoser.
 func (d Readiness) Diagnose(_ context.Context, target Target) (Result, error) {
+	if target.Workload.Kind() == "StatefulSet" {
+		// The progress-deadline gate this Diagnoser depends on never opens
+		// for StatefulSet (see ProgressDeadline's own Skip): without this
+		// explicit Skip, Readiness would stay permanently, silently empty
+		// for the entire kind, indistinguishable from "evaluated every
+		// container and found none unready".
+		return SkipResult(d.ID(), "readiness classification depends on progress-deadline evaluation, which is not available for this kind"), nil
+	}
 	if _, exceeded := target.Workload.ProgressDeadlineExceeded(); !exceeded {
 		return Result{DiagnoserID: d.ID()}, nil
 	}

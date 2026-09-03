@@ -66,6 +66,13 @@ func deploymentFixture(name string) *appsv1.Deployment {
 	}
 }
 
+func statefulSetFixture(name string) *appsv1.StatefulSet {
+	return &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec:       appsv1.StatefulSetSpec{Replicas: func() *int32 { r := int32(3); return &r }()},
+	}
+}
+
 func TestResolveWorkload_Deployment(t *testing.T) {
 	d := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "checkout", Namespace: "default"},
@@ -88,9 +95,6 @@ func TestResolveWorkload_Deployment(t *testing.T) {
 // missing object instead of an unsupported feature.
 func TestResolveWorkload_UnsupportedKind(t *testing.T) {
 	unsupported := []string{
-		"statefulset/checkout",
-		"statefulsets/checkout",
-		"sts/checkout",
 		"daemonset/checkout",
 		"daemonsets/checkout",
 		"ds/checkout",
@@ -113,8 +117,8 @@ func TestResolveWorkload_UnsupportedKind(t *testing.T) {
 			if !strings.Contains(err.Error(), kind) {
 				t.Errorf("error must name the rejected kind %q, got: %v", kind, err)
 			}
-			if !strings.Contains(strings.ToLower(err.Error()), "deployment") {
-				t.Errorf("error must name what is supported, got: %v", err)
+			if !strings.Contains(strings.ToLower(err.Error()), "deployment") || !strings.Contains(strings.ToLower(err.Error()), "statefulset") {
+				t.Errorf("error must name what is supported (Deployment and StatefulSet), got: %v", err)
 			}
 		})
 	}
@@ -133,6 +137,43 @@ func TestResolveWorkload_AcceptedDeploymentAliases(t *testing.T) {
 	} {
 		t.Run(ref, func(t *testing.T) {
 			client := fake.NewSimpleClientset(deploymentFixture("checkout"))
+
+			w, err := ResolveWorkload(context.Background(), client, "default", ref)
+			if err != nil {
+				t.Fatalf("reference %q must resolve, got: %v", ref, err)
+			}
+			if w.Name() != "checkout" {
+				t.Errorf("resolved workload name = %q, expected checkout", w.Name())
+			}
+		})
+	}
+}
+
+func TestResolveWorkload_StatefulSet(t *testing.T) {
+	client := fake.NewSimpleClientset(statefulSetFixture("checkout"))
+
+	w, err := ResolveWorkload(context.Background(), client, "default", "statefulset/checkout")
+	if err != nil {
+		t.Fatalf("ResolveWorkload: %v", err)
+	}
+	if w.Kind() != "StatefulSet" || w.Name() != "checkout" || w.Replicas() != 3 {
+		t.Errorf("resolved workload = {Kind: %q, Name: %q, Replicas: %d}, expected {StatefulSet, checkout, 3}", w.Kind(), w.Name(), w.Replicas())
+	}
+}
+
+// Case and the short/plural forms kubectl itself accepts must all resolve, so
+// that a habit formed with kubectl does not fail here for no reason.
+func TestResolveWorkload_AcceptedStatefulSetAliases(t *testing.T) {
+	for _, ref := range []string{
+		"statefulset/checkout",
+		"statefulsets/checkout",
+		"sts/checkout",
+		"StatefulSet/checkout",
+		"STS/checkout",
+		"statefulset.apps/checkout",
+	} {
+		t.Run(ref, func(t *testing.T) {
+			client := fake.NewSimpleClientset(statefulSetFixture("checkout"))
 
 			w, err := ResolveWorkload(context.Background(), client, "default", ref)
 			if err != nil {

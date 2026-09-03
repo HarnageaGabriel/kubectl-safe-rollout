@@ -31,6 +31,15 @@ const ProgressDeadlineDiagnoserID = "progress-deadline"
 // the condition read by Workload.ProgressDeadlineExceeded() is already the
 // cause, not a symptom to interpret, so this category has no
 // "-undetermined" variant.
+//
+// StatefulSet has no progressDeadlineSeconds field and no controller-set
+// Progressing condition at all (see Workload.ProgressDeadlineExceeded's own
+// doc comment): ok=false from that method is therefore ambiguous on its own
+// — it also means "applicable to this kind, just not exceeded right now"
+// for Deployment. Gating on target.Workload.Kind() directly, instead of
+// treating every ok=false as a Skip, keeps that distinction intact: a
+// Deployment mid-rollout that has not yet exceeded its deadline must still
+// silently report no Finding, not a Skip.
 type ProgressDeadline struct{}
 
 // ID implements Diagnoser.
@@ -38,6 +47,9 @@ func (ProgressDeadline) ID() string { return ProgressDeadlineDiagnoserID }
 
 // Diagnose implements Diagnoser.
 func (ProgressDeadline) Diagnose(_ context.Context, target Target) (Result, error) {
+	if target.Workload.Kind() == "StatefulSet" {
+		return SkipResult(ProgressDeadlineDiagnoserID, "StatefulSet has no progressDeadlineSeconds and its controller sets no Progressing condition: this category cannot be evaluated for this kind"), nil
+	}
 	message, exceeded := target.Workload.ProgressDeadlineExceeded()
 	if !exceeded {
 		return Result{DiagnoserID: ProgressDeadlineDiagnoserID}, nil

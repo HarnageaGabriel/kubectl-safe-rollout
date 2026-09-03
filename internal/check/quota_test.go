@@ -192,6 +192,54 @@ func TestQuotaHeadroom_QuotaWithoutRelevantKeys_Ignored(t *testing.T) {
 	}
 }
 
+// StatefulSet has no MaxSurge field at all: its rolling update deletes a pod
+// before creating its replacement, one ordinal at a time, so it never
+// exceeds Replicas. surgeCount() must resolve to ok=false purely because
+// UpdateStrategy().MaxSurge is nil (no special-casing of workload.Kind is
+// expected or desired), producing zero findings even against a ResourceQuota
+// with no headroom at all.
+func TestQuotaHeadroom_StatefulSet_RollingUpdate_NoSurge(t *testing.T) {
+	s := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: testNamespace},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: int32Ptr(4),
+			UpdateStrategy: appsv1.StatefulSetUpdateStrategy{
+				Type: appsv1.RollingUpdateStatefulSetStrategyType,
+			},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:  "app",
+						Image: "example.com/app:v1",
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("100m"),
+								corev1.ResourceMemory: resource.MustParse("128Mi"),
+							},
+						},
+					}},
+				},
+			},
+		},
+	}
+	quota := resourceQuota("tight", corev1.ResourceList{corev1.ResourcePods: resource.MustParse("4")}, corev1.ResourceList{corev1.ResourcePods: resource.MustParse("4")})
+	client := fake.NewSimpleClientset(s, quota)
+
+	target := check.Target{
+		Namespace: testNamespace,
+		Workload:  workload.FromStatefulSet(s),
+		Client:    client,
+	}
+
+	res, err := check.QuotaHeadroom{}.Run(context.Background(), target)
+	if err != nil {
+		t.Fatalf("Run() returned an unexpected error: %v", err)
+	}
+	if len(res.Findings) != 0 {
+		t.Fatalf("StatefulSet rolling update never surges; want 0 findings even with a full quota, got %+v", res.Findings)
+	}
+}
+
 func TestQuotaHeadroom_ListFailed_Skipped(t *testing.T) {
 	surge := intstr.FromInt(1)
 	d := deploymentWithRequests(4, &surge, "100m", "128Mi")

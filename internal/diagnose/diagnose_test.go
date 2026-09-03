@@ -32,6 +32,13 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/workload"
 )
 
+// podCreationSourceFromReplicaSet adapts the tests' pre-existing ReplicaSet
+// fixtures to diagnose.PodCreationSource, so quota_test.go's Deployment-path
+// tests remain unchanged in shape.
+func podCreationSourceFromReplicaSet(rs appsv1.ReplicaSet) diagnose.PodCreationSource {
+	return diagnose.PodCreationSource{Kind: "ReplicaSet", Namespace: rs.Namespace, Name: rs.Name, UID: rs.UID}
+}
+
 const testNamespace = "default"
 
 func int32Ptr(v int32) *int32 { return &v }
@@ -56,16 +63,22 @@ func event(uid types.UID, reason, message string) corev1.Event {
 
 // newTarget builds a test diagnose.Target. extraObjs populates the fake
 // clientset (used by the Pending Diagnoser to read the
-// PersistentVolumeClaims referenced by the pods).
+// PersistentVolumeClaims referenced by the pods). replicaSets keeps the
+// existing call sites (all Deployment-path fixtures) unchanged in shape:
+// they are adapted into diagnose.PodCreationSource internally.
 func newTarget(t *testing.T, pods []corev1.Pod, events []corev1.Event, replicaSets []appsv1.ReplicaSet, extraObjs ...runtime.Object) diagnose.Target {
 	t.Helper()
 	client := fake.NewSimpleClientset(extraObjs...)
+	sources := make([]diagnose.PodCreationSource, 0, len(replicaSets))
+	for _, rs := range replicaSets {
+		sources = append(sources, podCreationSourceFromReplicaSet(rs))
+	}
 	return diagnose.Target{
-		Namespace:   testNamespace,
-		Client:      client,
-		Pods:        pods,
-		ReplicaSets: replicaSets,
-		EventsByUID: diagnose.GroupEventsByInvolvedObject(events),
+		Namespace:          testNamespace,
+		Client:             client,
+		Pods:               pods,
+		PodCreationSources: sources,
+		EventsByUID:        diagnose.GroupEventsByInvolvedObject(events),
 	}
 }
 

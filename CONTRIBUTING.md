@@ -100,7 +100,9 @@ Current verification gaps include:
 - Only containerd 2.2 has been verified. CRI-O has never been exercised, so its event-message patterns are unconfirmed.
 - The HTTP 410 / etcd-compaction relist path has only been exercised against a fake clientset, never against a real `resourceVersion` expiry.
 - The plugin has never been run with a namespace-scoped, read-only ServiceAccount under restricted RBAC.
-- `watch` currently supports Deployment only, not StatefulSet.
+- StatefulSet support (`check` and `watch`) has been run end to end once,
+  against Kubernetes v1.37.0 (newer than the three pinned minors above) —
+  not yet re-verified across multiple minors the way Deployment has been.
 
 ## Reporting bugs and security issues
 

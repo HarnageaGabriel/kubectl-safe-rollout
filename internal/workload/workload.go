@@ -13,10 +13,10 @@
 // limitations under the License.
 
 // Package workload abstracts differences among Kubernetes workload types
-// (Deployment, and StatefulSet in the future) behind a single interface.
-// Checks in internal/check operate on Workload, not concrete types from
-// k8s.io/api/apps/v1: this prevents every new check from having to handle
-// a switch on Deployment/StatefulSet/DaemonSet.
+// (Deployment and StatefulSet; DaemonSet remains unsupported) behind a
+// single interface. Checks in internal/check operate on Workload, not
+// concrete types from k8s.io/api/apps/v1: this prevents every new check from
+// having to handle a switch on Deployment/StatefulSet/DaemonSet.
 package workload
 
 import (
@@ -37,13 +37,22 @@ type UpdateStrategy struct {
 	Type           string
 	MaxUnavailable *intstr.IntOrString
 	MaxSurge       *intstr.IntOrString
+	// Partition is meaningful only for StatefulSet's RollingUpdate strategy:
+	// the ordinal at which the update is partitioned (pods with an ordinal
+	// below Partition are left untouched by the rollout). nil for Deployment,
+	// and nil for a StatefulSet that does not set it explicitly — kept
+	// distinguishable from an explicit 0, the same convention already used
+	// for MaxUnavailable/MaxSurge.
+	Partition *int32
 }
 
 // Recreate and RollingUpdate replicate the appsv1 constants to avoid forcing
 // callers to import k8s.io/api/apps/v1 only to compare the strategy type.
+// OnDelete has no Deployment equivalent: it exists only for StatefulSet.
 const (
 	Recreate        = "Recreate"
 	RollingUpdate   = "RollingUpdate"
+	OnDelete        = "OnDelete"
 	defaultMaxUnav  = "25%"
 	defaultMaxSurge = "25%"
 )
@@ -124,6 +133,19 @@ type Workload interface {
 	// would wait indefinitely on a paused rollout with no way to explain
 	// why.
 	Paused() bool
+	// PendingRevisionUpdate reports the controller's desired and current
+	// revision hashes, and whether this concept applies to this controller
+	// type at all. It exists for StatefulSet's OnDelete strategy: the
+	// controller sets status.updateRevision as soon as the pod template
+	// changes but, under OnDelete, never acts on a Pod itself (see
+	// UpdateStrategy's OnDelete constant) — updateRevision != currentRevision
+	// is the only available signal that an update is pending, since nothing
+	// else in Status changes. ok=false means "not applicable to this
+	// controller type" (always the case for Deployment, whose Status carries
+	// no revision-hash pair), never "definitely no pending update" —
+	// matching the convention already established by
+	// ProgressDeadlineExceeded/Paused.
+	PendingRevisionUpdate() (updateRevision, currentRevision string, ok bool)
 }
 
 type deploymentWorkload struct {
@@ -273,4 +295,11 @@ func (w *deploymentWorkload) ProgressDeadlineExceeded() (message string, ok bool
 // Paused implements Workload.
 func (w *deploymentWorkload) Paused() bool {
 	return w.d.Spec.Paused
+}
+
+// PendingRevisionUpdate implements Workload. Deployment's Status carries no
+// revision-hash pair comparable to StatefulSet's UpdateRevision/
+// CurrentRevision, so this is never applicable.
+func (w *deploymentWorkload) PendingRevisionUpdate() (updateRevision, currentRevision string, ok bool) {
+	return "", "", false
 }
