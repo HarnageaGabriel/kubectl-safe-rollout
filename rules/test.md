@@ -35,10 +35,12 @@
   all three minors; do not remove this note without actually rerunning
   `make test-e2e-versions`. Six StatefulSet e2e scenarios also exist in
   `test/e2e/statefulset_test.go` (added alongside StatefulSet support in
-  `internal/workload`/`internal/diagnose`) but are not part of the count
-  above and have not been run against any cluster: no Docker/kind was
-  available on the machine that wrote them, so they are unverified until
-  someone runs `make test-e2e` with them present. Each scenario creates a disposable namespace
+  `internal/workload`/`internal/diagnose`), not part of the 20-scenario
+  count above since they cover a second workload kind rather than an
+  additional cause: they have passed once, on kind v0.33 against
+  Kubernetes v1.37.0 (containerd 2.3.4), alongside the full Deployment
+  suite with zero regression — but not yet across the three pinned minors
+  the Deployment scenarios are verified against. Each scenario creates a disposable namespace
   and deletes it at the end of the test (`t.Cleanup`); always use real,
   redirectable image/registry references (Docker Hub, non-resolving DNS) to
   exercise real containerd/kubelet/scheduler error messages, never a
