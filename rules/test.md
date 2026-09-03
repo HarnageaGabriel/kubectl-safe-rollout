@@ -33,7 +33,12 @@
   proves a paused rollout is reported immediately. The 20th
   (`serviceaccount-missing`) is newly added and not yet re-verified across
   all three minors; do not remove this note without actually rerunning
-  `make test-e2e-versions`. Each scenario creates a disposable namespace
+  `make test-e2e-versions`. Six StatefulSet e2e scenarios also exist in
+  `test/e2e/statefulset_test.go` (added alongside StatefulSet support in
+  `internal/workload`/`internal/diagnose`) but are not part of the count
+  above and have not been run against any cluster: no Docker/kind was
+  available on the machine that wrote them, so they are unverified until
+  someone runs `make test-e2e` with them present. Each scenario creates a disposable namespace
   and deletes it at the end of the test (`t.Cleanup`); always use real,
   redirectable image/registry references (Docker Hub, non-resolving DNS) to
   exercise real containerd/kubelet/scheduler error messages, never a

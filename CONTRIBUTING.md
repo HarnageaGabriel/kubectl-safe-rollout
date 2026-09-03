@@ -100,7 +100,10 @@ Current verification gaps include:
 - Only containerd 2.2 has been verified. CRI-O has never been exercised, so its event-message patterns are unconfirmed.
 - The HTTP 410 / etcd-compaction relist path has only been exercised against a fake clientset, never against a real `resourceVersion` expiry.
 - The plugin has never been run with a namespace-scoped, read-only ServiceAccount under restricted RBAC.
-- `watch` currently supports Deployment only, not StatefulSet.
+- StatefulSet support (`check` and `watch`) has been added but is
+  e2e-verified only for Deployment so far: StatefulSet e2e scenarios exist
+  in `test/e2e/statefulset_test.go` but have not been run against a real
+  cluster on this machine.
 
 ## Reporting bugs and security issues
 
