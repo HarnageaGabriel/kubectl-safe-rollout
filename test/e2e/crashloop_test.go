@@ -109,7 +109,7 @@ func TestWatchE2E_CrashLoopLivenessProbe(t *testing.T) {
 			Image: "nginx:1.25",
 			LivenessProbe: &corev1.Probe{
 				ProbeHandler: corev1.ProbeHandler{
-					HTTPGet: &corev1.HTTPGetAction{Path: "/questo-path-non-esiste", Port: intstr.FromInt32(80)},
+					HTTPGet: &corev1.HTTPGetAction{Path: "/this-path-does-not-exist", Port: intstr.FromInt32(80)},
 				},
 				InitialDelaySeconds: 1,
 				PeriodSeconds:       1,

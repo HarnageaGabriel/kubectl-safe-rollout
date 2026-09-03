@@ -60,7 +60,7 @@ func TestWatchE2E_SchedulingConstraints(t *testing.T) {
 	ns := newE2ENamespace(t, client)
 
 	podSpec := corev1.PodSpec{
-		NodeSelector: map[string]string{"questa-label-non-esiste-su-nessun-nodo": "true"},
+		NodeSelector: map[string]string{"this-label-does-not-exist-on-any-node": "true"},
 		Containers: []corev1.Container{{
 			Name:    "app",
 			Image:   "busybox:1.36",
@@ -79,7 +79,7 @@ func TestWatchE2E_UnboundPVC(t *testing.T) {
 	client := newE2EClient(t)
 	ns := newE2ENamespace(t, client)
 
-	storageClass := "questa-storageclass-non-esiste"
+	storageClass := "this-storageclass-does-not-exist"
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{Name: "data-pvc", Namespace: ns},
 		Spec: corev1.PersistentVolumeClaimSpec{
