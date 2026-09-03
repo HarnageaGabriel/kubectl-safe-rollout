@@ -132,6 +132,11 @@ func (w *statefulSetWorkload) ServiceAccountName() string {
 	return w.s.Spec.Template.Spec.ServiceAccountName
 }
 
+// PriorityClassName implements Workload.
+func (w *statefulSetWorkload) PriorityClassName() string {
+	return w.s.Spec.Template.Spec.PriorityClassName
+}
+
 // RolloutComplete replicates the public contract of `kubectl rollout status`
 // for StatefulSet. k8s.io/kubectl (pkg/polymorphichelpers, the package that
 // owns StatefulSetStatusViewer) is NOT a dependency of this module and is not

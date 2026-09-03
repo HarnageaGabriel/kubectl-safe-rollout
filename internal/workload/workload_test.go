@@ -164,6 +164,24 @@ func TestFromDeployment_ImagePullSecretsAndServiceAccount(t *testing.T) {
 	}
 }
 
+func TestFromDeployment_PriorityClassName(t *testing.T) {
+	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+			PriorityClassName: "high-priority",
+		}},
+	}}
+	if got := workload.FromDeployment(d).PriorityClassName(); got != "high-priority" {
+		t.Fatalf("PriorityClassName() = %q, expected high-priority", got)
+	}
+}
+
+func TestFromDeployment_PriorityClassName_UnsetIsEmpty(t *testing.T) {
+	d := &appsv1.Deployment{}
+	if got := workload.FromDeployment(d).PriorityClassName(); got != "" {
+		t.Fatalf("PriorityClassName() = %q, expected empty string when unset", got)
+	}
+}
+
 func TestFromDeployment_PodSelectorUsesControllerSelector(t *testing.T) {
 	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{
 		Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
