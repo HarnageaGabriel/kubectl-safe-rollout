@@ -43,6 +43,7 @@ func registeredChecks() []check.Check {
 		check.ConfigReferencesExist{},
 		check.PVCExists{},
 		check.NetworkPolicyIngress{},
+		check.SchedulingConstraintsFeasibility{},
 		check.RequestsVsUsage{},
 		check.ProbeSanity{},
 		check.ResourceLimits{},

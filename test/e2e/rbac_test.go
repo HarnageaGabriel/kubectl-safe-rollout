@@ -105,6 +105,18 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 		// touch the API and the scenario would prove nothing about its
 		// degrade path.
 		PriorityClassName: "restricted-priority",
+		// Gives scheduling-constraints-feasibility something to actually
+		// evaluate: without a real topologySpreadConstraint/anti-affinity
+		// term it short-circuits before ever calling Nodes().List(), and
+		// this scenario would prove nothing about its degrade path (the
+		// restricted Role above grants nothing on the cluster-scoped nodes
+		// resource at all).
+		TopologySpreadConstraints: []corev1.TopologySpreadConstraint{{
+			MaxSkew:           1,
+			TopologyKey:       "topology.kubernetes.io/zone",
+			WhenUnsatisfiable: corev1.DoNotSchedule,
+			LabelSelector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": "restricted"}},
+		}},
 	}
 	d := deployWorkload(t, admin, ns, "restricted", 1, podSpec, nil)
 
@@ -147,6 +159,7 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 		check.ConfigReferencesExist{},
 		check.PVCExists{},
 		check.NetworkPolicyIngress{},
+		check.SchedulingConstraintsFeasibility{},
 		check.ProbeSanity{},
 		check.ResourceLimits{},
 		check.ImagePullSecrets{},
@@ -185,8 +198,11 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 	// horizontalpodautoscalers (also not granted); priorityclass-exists
 	// needs to get the PriorityClass the pod template names (also not
 	// granted — PriorityClass is cluster-scoped, and the Role above grants
-	// nothing in the scheduling.k8s.io API group at all).
-	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.PriorityClassExistsCheckID} {
+	// nothing in the scheduling.k8s.io API group at all);
+	// scheduling-constraints-feasibility needs to list the cluster-scoped
+	// nodes resource (also not granted — a namespaced Role can never grant
+	// it in the first place).
+	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.PriorityClassExistsCheckID, check.SchedulingConstraintsFeasibilityCheckID} {
 		if !contains(skipped, want) {
 			t.Errorf("check %q needs a resource the Role withholds and must skip, not fail or silently report clean (evaluated=%v, skipped=%v)", want, evaluated, skipped)
 		}

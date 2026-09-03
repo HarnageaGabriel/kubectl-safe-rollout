@@ -137,6 +137,31 @@ func (w *statefulSetWorkload) PriorityClassName() string {
 	return w.s.Spec.Template.Spec.PriorityClassName
 }
 
+// TopologySpreadConstraints implements Workload.
+func (w *statefulSetWorkload) TopologySpreadConstraints() []corev1.TopologySpreadConstraint {
+	return w.s.Spec.Template.Spec.TopologySpreadConstraints
+}
+
+// Affinity implements Workload.
+func (w *statefulSetWorkload) Affinity() *corev1.Affinity {
+	return w.s.Spec.Template.Spec.Affinity
+}
+
+// NodeSelector implements Workload.
+func (w *statefulSetWorkload) NodeSelector() map[string]string {
+	return w.s.Spec.Template.Spec.NodeSelector
+}
+
+// Tolerations implements Workload.
+func (w *statefulSetWorkload) Tolerations() []corev1.Toleration {
+	return w.s.Spec.Template.Spec.Tolerations
+}
+
+// SchedulerName implements Workload.
+func (w *statefulSetWorkload) SchedulerName() string {
+	return w.s.Spec.Template.Spec.SchedulerName
+}
+
 // RolloutComplete replicates the public contract of `kubectl rollout status`
 // for StatefulSet. k8s.io/kubectl (pkg/polymorphichelpers, the package that
 // owns StatefulSetStatusViewer) is NOT a dependency of this module and is not

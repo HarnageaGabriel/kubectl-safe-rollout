@@ -125,6 +125,31 @@ type Workload interface {
 	// getters deliberately do not share that convention, see the doc comment
 	// on PodSpec.PriorityClassName in k8s.io/api/core/v1/types.go.
 	PriorityClassName() string
+	// TopologySpreadConstraints exposes spec.topologySpreadConstraints from
+	// the pod template, used by scheduling-constraints-feasibility to
+	// evaluate whether the constraint can actually be satisfied by the
+	// cluster's current node topology.
+	TopologySpreadConstraints() []corev1.TopologySpreadConstraint
+	// Affinity exposes spec.affinity from the pod template as-is (may be
+	// nil). scheduling-constraints-feasibility reads NodeAffinity (to
+	// narrow candidate nodes) and PodAntiAffinity (to evaluate required
+	// self-anti-affinity) from it; no other check needs it today, so this
+	// stays a single passthrough rather than several narrower accessors.
+	Affinity() *corev1.Affinity
+	// NodeSelector exposes spec.nodeSelector from the pod template. Kept
+	// separate from Affinity because it is a distinct PodSpec field that
+	// combines with node affinity (both must match), not a part of it.
+	NodeSelector() map[string]string
+	// Tolerations exposes spec.tolerations from the pod template, used to
+	// determine which nodes a new pod of this workload can actually land
+	// on when a candidate node is tainted.
+	Tolerations() []corev1.Toleration
+	// SchedulerName exposes spec.schedulerName from the pod template. An
+	// empty string means the Kubernetes default ("default-scheduler") is
+	// implied but not written explicitly; callers that need to compare
+	// against the default must apply that default themselves, the same
+	// convention already used by ServiceAccountName.
+	SchedulerName() string
 	// RolloutComplete reports whether the rollout completed successfully:
 	// replicas are updated and available, and the controller observed the
 	// current Spec generation. Used by `watch` to stop observation on the
@@ -260,6 +285,31 @@ func (w *deploymentWorkload) ServiceAccountName() string {
 // PriorityClassName implements Workload.
 func (w *deploymentWorkload) PriorityClassName() string {
 	return w.d.Spec.Template.Spec.PriorityClassName
+}
+
+// TopologySpreadConstraints implements Workload.
+func (w *deploymentWorkload) TopologySpreadConstraints() []corev1.TopologySpreadConstraint {
+	return w.d.Spec.Template.Spec.TopologySpreadConstraints
+}
+
+// Affinity implements Workload.
+func (w *deploymentWorkload) Affinity() *corev1.Affinity {
+	return w.d.Spec.Template.Spec.Affinity
+}
+
+// NodeSelector implements Workload.
+func (w *deploymentWorkload) NodeSelector() map[string]string {
+	return w.d.Spec.Template.Spec.NodeSelector
+}
+
+// Tolerations implements Workload.
+func (w *deploymentWorkload) Tolerations() []corev1.Toleration {
+	return w.d.Spec.Template.Spec.Tolerations
+}
+
+// SchedulerName implements Workload.
+func (w *deploymentWorkload) SchedulerName() string {
+	return w.d.Spec.Template.Spec.SchedulerName
 }
 
 // RolloutComplete replicates the `kubectl rollout status` logic for
