@@ -69,10 +69,10 @@ func FuzzMissingConfigObject(f *testing.F) {
 func FuzzImagePullFailure(f *testing.F) {
 	for _, message := range []string{
 		`Failed to pull image "registry.example.com/app:v9.9.9": rpc error: code = NotFound desc = failed to pull and unpack image: failed to resolve reference: manifest unknown`,
-		`Failed to pull image "busybox:questo-tag-non-esiste-v99": rpc error: code = NotFound desc = failed to pull and unpack image "docker.io/library/busybox:questo-tag-non-esiste-v99": failed to resolve reference "docker.io/library/busybox:questo-tag-non-esiste-v99": docker.io/library/busybox:questo-tag-non-esiste-v99: not found`,
-		`Failed to pull image "docker.io/kubectlsaferolloute2e/repo-privata-inesistente:v1": failed to pull and unpack image "docker.io/kubectlsaferolloute2e/repo-privata-inesistente:v1": failed to resolve reference "docker.io/kubectlsaferolloute2e/repo-privata-inesistente:v1": pull access denied, repository does not exist or may require authorization: server message: insufficient_scope: authorization failed`,
+		`Failed to pull image "busybox:this-tag-does-not-exist-v99": rpc error: code = NotFound desc = failed to pull and unpack image "docker.io/library/busybox:this-tag-does-not-exist-v99": failed to resolve reference "docker.io/library/busybox:this-tag-does-not-exist-v99": docker.io/library/busybox:this-tag-does-not-exist-v99: not found`,
+		`Failed to pull image "docker.io/kubectlsaferolloute2e/nonexistent-private-repo:v1": failed to pull and unpack image "docker.io/kubectlsaferolloute2e/nonexistent-private-repo:v1": failed to resolve reference "docker.io/kubectlsaferolloute2e/nonexistent-private-repo:v1": pull access denied, repository does not exist or may require authorization: server message: insufficient_scope: authorization failed`,
 		`Failed to pull image "registry.invalid.safe-rollout-e2e.example/app:v1": failed to pull and unpack image "registry.invalid.safe-rollout-e2e.example/app:v1": failed to resolve reference "registry.invalid.safe-rollout-e2e.example/app:v1": failed to do request: Head "https://registry.invalid.safe-rollout-e2e.example/v2/app/manifests/v1": dial tcp: lookup registry.invalid.safe-rollout-e2e.example on 192.168.65.254:53: no such host`,
-		"qualcosa che non abbiamo mai visto prima",
+		"something we have never seen before",
 		"manifest unknownness",
 	} {
 		f.Add(message)
@@ -132,7 +132,7 @@ func FuzzFailedScheduling(f *testing.F) {
 		"0/5 nodes are available: 5 Insufficient cpu.",
 		"0/5 nodes are available: 5 node(s) didn't match Pod's node affinity/selector.",
 		"0/5 nodes are available: pod has unbound immediate PersistentVolumeClaims.",
-		"qualcosa che non abbiamo mai visto prima",
+		"something we have never seen before",
 		"insufficient cpuish",
 	} {
 		f.Add(message)

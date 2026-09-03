@@ -62,7 +62,7 @@ func TestImagePullFailure_TagNotFound(t *testing.T) {
 // current versions. Both remain because both occur in practice depending
 // on the cluster.
 func TestImagePullFailure_TagNotFound_RealContainerd(t *testing.T) {
-	cause, ok := pattern.ImagePullFailure(`Failed to pull image "busybox:questo-tag-non-esiste-v99": rpc error: code = NotFound desc = failed to pull and unpack image "docker.io/library/busybox:questo-tag-non-esiste-v99": failed to resolve reference "docker.io/library/busybox:questo-tag-non-esiste-v99": docker.io/library/busybox:questo-tag-non-esiste-v99: not found`)
+	cause, ok := pattern.ImagePullFailure(`Failed to pull image "busybox:this-tag-does-not-exist-v99": rpc error: code = NotFound desc = failed to pull and unpack image "docker.io/library/busybox:this-tag-does-not-exist-v99": failed to resolve reference "docker.io/library/busybox:this-tag-does-not-exist-v99": docker.io/library/busybox:this-tag-does-not-exist-v99: not found`)
 	if !ok || cause != "tag-not-found" {
 		t.Fatalf("cause=%q ok=%v, expected tag-not-found", cause, ok)
 	}
@@ -75,7 +75,7 @@ func TestImagePullFailure_TagNotFound_RealContainerd(t *testing.T) {
 // tag-not-found message: this case made it necessary to exclude that prefix
 // from the tag-not-found pattern (see the comment in pattern.go).
 func TestImagePullFailure_Unauthorized(t *testing.T) {
-	cause, ok := pattern.ImagePullFailure(`Failed to pull image "docker.io/kubectlsaferolloute2e/repo-privata-inesistente:v1": failed to pull and unpack image "docker.io/kubectlsaferolloute2e/repo-privata-inesistente:v1": failed to resolve reference "docker.io/kubectlsaferolloute2e/repo-privata-inesistente:v1": pull access denied, repository does not exist or may require authorization: server message: insufficient_scope: authorization failed`)
+	cause, ok := pattern.ImagePullFailure(`Failed to pull image "docker.io/kubectlsaferolloute2e/nonexistent-private-repo:v1": failed to pull and unpack image "docker.io/kubectlsaferolloute2e/nonexistent-private-repo:v1": failed to resolve reference "docker.io/kubectlsaferolloute2e/nonexistent-private-repo:v1": pull access denied, repository does not exist or may require authorization: server message: insufficient_scope: authorization failed`)
 	if !ok || cause != "unauthorized" {
 		t.Fatalf("cause=%q ok=%v, expected unauthorized", cause, ok)
 	}
@@ -93,7 +93,7 @@ func TestImagePullFailure_RegistryUnreachable(t *testing.T) {
 }
 
 func TestImagePullFailure_UnrecognizedMessage(t *testing.T) {
-	_, ok := pattern.ImagePullFailure("qualcosa che non abbiamo mai visto prima")
+	_, ok := pattern.ImagePullFailure("something we have never seen before")
 	if ok {
 		t.Fatal("expected ok=false for a message without a known pattern")
 	}
@@ -157,7 +157,7 @@ func TestFailedScheduling_PVCUnbound(t *testing.T) {
 }
 
 func TestFailedScheduling_UnrecognizedMessage(t *testing.T) {
-	_, ok := pattern.FailedScheduling("qualcosa che non abbiamo mai visto prima")
+	_, ok := pattern.FailedScheduling("something we have never seen before")
 	if ok {
 		t.Fatal("expected ok=false for a message without a known pattern")
 	}

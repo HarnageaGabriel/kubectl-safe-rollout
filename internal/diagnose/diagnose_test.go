@@ -84,10 +84,10 @@ func newTarget(t *testing.T, pods []corev1.Pod, events []corev1.Event, replicaSe
 
 func TestGroupEventsByInvolvedObject_GroupsByUID(t *testing.T) {
 	events := []corev1.Event{
-		event("pod-a", "Failed", "primo"),
-		event("pod-a", "Failed", "secondo"),
-		event("pod-b", "Failed", "terzo"),
-		event("", "Failed", "senza involved object, va ignorato"),
+		event("pod-a", "Failed", "first"),
+		event("pod-a", "Failed", "second"),
+		event("pod-b", "Failed", "third"),
+		event("", "Failed", "no involved object, must be ignored"),
 	}
 
 	grouped := diagnose.GroupEventsByInvolvedObject(events)
