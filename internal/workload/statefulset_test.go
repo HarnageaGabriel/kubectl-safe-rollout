@@ -63,6 +63,92 @@ func TestFromStatefulSet_PriorityClassName(t *testing.T) {
 	}
 }
 
+func TestFromStatefulSet_TopologySpreadConstraints(t *testing.T) {
+	tsc := []corev1.TopologySpreadConstraint{{MaxSkew: 1, TopologyKey: "kubernetes.io/hostname", WhenUnsatisfiable: corev1.DoNotSchedule}}
+	s := &appsv1.StatefulSet{Spec: appsv1.StatefulSetSpec{
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{TopologySpreadConstraints: tsc}},
+	}}
+	got := workload.FromStatefulSet(s).TopologySpreadConstraints()
+	if len(got) != 1 || got[0].TopologyKey != "kubernetes.io/hostname" {
+		t.Fatalf("TopologySpreadConstraints() = %+v, expected the pod template's constraint", got)
+	}
+}
+
+func TestFromStatefulSet_TopologySpreadConstraints_UnsetIsEmpty(t *testing.T) {
+	s := &appsv1.StatefulSet{}
+	if got := workload.FromStatefulSet(s).TopologySpreadConstraints(); len(got) != 0 {
+		t.Fatalf("TopologySpreadConstraints() = %+v, expected empty when unset", got)
+	}
+}
+
+func TestFromStatefulSet_Affinity(t *testing.T) {
+	affinity := &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{}}
+	s := &appsv1.StatefulSet{Spec: appsv1.StatefulSetSpec{
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Affinity: affinity}},
+	}}
+	if got := workload.FromStatefulSet(s).Affinity(); got != affinity {
+		t.Fatalf("Affinity() = %+v, expected the exact pod template value", got)
+	}
+}
+
+func TestFromStatefulSet_Affinity_UnsetIsNil(t *testing.T) {
+	s := &appsv1.StatefulSet{}
+	if got := workload.FromStatefulSet(s).Affinity(); got != nil {
+		t.Fatalf("Affinity() = %+v, expected nil when unset", got)
+	}
+}
+
+func TestFromStatefulSet_NodeSelector(t *testing.T) {
+	s := &appsv1.StatefulSet{Spec: appsv1.StatefulSetSpec{
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{NodeSelector: map[string]string{"tier": "db"}}},
+	}}
+	got := workload.FromStatefulSet(s).NodeSelector()
+	if got["tier"] != "db" || len(got) != 1 {
+		t.Fatalf("NodeSelector() = %+v, expected {tier: db}", got)
+	}
+}
+
+func TestFromStatefulSet_NodeSelector_UnsetIsEmpty(t *testing.T) {
+	s := &appsv1.StatefulSet{}
+	if got := workload.FromStatefulSet(s).NodeSelector(); len(got) != 0 {
+		t.Fatalf("NodeSelector() = %+v, expected empty when unset", got)
+	}
+}
+
+func TestFromStatefulSet_Tolerations(t *testing.T) {
+	tolerations := []corev1.Toleration{{Key: "dedicated", Operator: corev1.TolerationOpExists}}
+	s := &appsv1.StatefulSet{Spec: appsv1.StatefulSetSpec{
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Tolerations: tolerations}},
+	}}
+	got := workload.FromStatefulSet(s).Tolerations()
+	if len(got) != 1 || got[0].Key != "dedicated" {
+		t.Fatalf("Tolerations() = %+v, expected the pod template's toleration", got)
+	}
+}
+
+func TestFromStatefulSet_Tolerations_UnsetIsEmpty(t *testing.T) {
+	s := &appsv1.StatefulSet{}
+	if got := workload.FromStatefulSet(s).Tolerations(); len(got) != 0 {
+		t.Fatalf("Tolerations() = %+v, expected empty when unset", got)
+	}
+}
+
+func TestFromStatefulSet_SchedulerName(t *testing.T) {
+	s := &appsv1.StatefulSet{Spec: appsv1.StatefulSetSpec{
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{SchedulerName: "custom-scheduler"}},
+	}}
+	if got := workload.FromStatefulSet(s).SchedulerName(); got != "custom-scheduler" {
+		t.Fatalf("SchedulerName() = %q, expected custom-scheduler", got)
+	}
+}
+
+func TestFromStatefulSet_SchedulerName_UnsetIsEmpty(t *testing.T) {
+	s := &appsv1.StatefulSet{}
+	if got := workload.FromStatefulSet(s).SchedulerName(); got != "" {
+		t.Fatalf("SchedulerName() = %q, expected empty string when unset", got)
+	}
+}
+
 func TestFromStatefulSet_UpdateStrategy_OnDelete(t *testing.T) {
 	s := &appsv1.StatefulSet{Spec: appsv1.StatefulSetSpec{
 		UpdateStrategy: appsv1.StatefulSetUpdateStrategy{Type: appsv1.OnDeleteStatefulSetStrategyType},

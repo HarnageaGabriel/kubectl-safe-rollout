@@ -182,6 +182,92 @@ func TestFromDeployment_PriorityClassName_UnsetIsEmpty(t *testing.T) {
 	}
 }
 
+func TestFromDeployment_TopologySpreadConstraints(t *testing.T) {
+	tsc := []corev1.TopologySpreadConstraint{{MaxSkew: 1, TopologyKey: "topology.kubernetes.io/zone", WhenUnsatisfiable: corev1.DoNotSchedule}}
+	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{TopologySpreadConstraints: tsc}},
+	}}
+	got := workload.FromDeployment(d).TopologySpreadConstraints()
+	if len(got) != 1 || got[0].TopologyKey != "topology.kubernetes.io/zone" {
+		t.Fatalf("TopologySpreadConstraints() = %+v, expected the pod template's constraint", got)
+	}
+}
+
+func TestFromDeployment_TopologySpreadConstraints_UnsetIsEmpty(t *testing.T) {
+	d := &appsv1.Deployment{}
+	if got := workload.FromDeployment(d).TopologySpreadConstraints(); len(got) != 0 {
+		t.Fatalf("TopologySpreadConstraints() = %+v, expected empty when unset", got)
+	}
+}
+
+func TestFromDeployment_Affinity(t *testing.T) {
+	affinity := &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{}}
+	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Affinity: affinity}},
+	}}
+	if got := workload.FromDeployment(d).Affinity(); got != affinity {
+		t.Fatalf("Affinity() = %+v, expected the exact pod template value", got)
+	}
+}
+
+func TestFromDeployment_Affinity_UnsetIsNil(t *testing.T) {
+	d := &appsv1.Deployment{}
+	if got := workload.FromDeployment(d).Affinity(); got != nil {
+		t.Fatalf("Affinity() = %+v, expected nil when unset", got)
+	}
+}
+
+func TestFromDeployment_NodeSelector(t *testing.T) {
+	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{NodeSelector: map[string]string{"tier": "web"}}},
+	}}
+	got := workload.FromDeployment(d).NodeSelector()
+	if got["tier"] != "web" || len(got) != 1 {
+		t.Fatalf("NodeSelector() = %+v, expected {tier: web}", got)
+	}
+}
+
+func TestFromDeployment_NodeSelector_UnsetIsEmpty(t *testing.T) {
+	d := &appsv1.Deployment{}
+	if got := workload.FromDeployment(d).NodeSelector(); len(got) != 0 {
+		t.Fatalf("NodeSelector() = %+v, expected empty when unset", got)
+	}
+}
+
+func TestFromDeployment_Tolerations(t *testing.T) {
+	tolerations := []corev1.Toleration{{Key: "dedicated", Operator: corev1.TolerationOpExists}}
+	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Tolerations: tolerations}},
+	}}
+	got := workload.FromDeployment(d).Tolerations()
+	if len(got) != 1 || got[0].Key != "dedicated" {
+		t.Fatalf("Tolerations() = %+v, expected the pod template's toleration", got)
+	}
+}
+
+func TestFromDeployment_Tolerations_UnsetIsEmpty(t *testing.T) {
+	d := &appsv1.Deployment{}
+	if got := workload.FromDeployment(d).Tolerations(); len(got) != 0 {
+		t.Fatalf("Tolerations() = %+v, expected empty when unset", got)
+	}
+}
+
+func TestFromDeployment_SchedulerName(t *testing.T) {
+	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{SchedulerName: "custom-scheduler"}},
+	}}
+	if got := workload.FromDeployment(d).SchedulerName(); got != "custom-scheduler" {
+		t.Fatalf("SchedulerName() = %q, expected custom-scheduler", got)
+	}
+}
+
+func TestFromDeployment_SchedulerName_UnsetIsEmpty(t *testing.T) {
+	d := &appsv1.Deployment{}
+	if got := workload.FromDeployment(d).SchedulerName(); got != "" {
+		t.Fatalf("SchedulerName() = %q, expected empty string when unset (the default-scheduler default is implicit, not applied here)", got)
+	}
+}
+
 func TestFromDeployment_PodSelectorUsesControllerSelector(t *testing.T) {
 	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{
 		Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
