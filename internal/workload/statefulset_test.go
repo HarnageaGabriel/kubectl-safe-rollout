@@ -52,6 +52,17 @@ func TestFromStatefulSet_Identity(t *testing.T) {
 	}
 }
 
+func TestFromStatefulSet_PriorityClassName(t *testing.T) {
+	s := &appsv1.StatefulSet{Spec: appsv1.StatefulSetSpec{
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+			PriorityClassName: "high-priority",
+		}},
+	}}
+	if got := workload.FromStatefulSet(s).PriorityClassName(); got != "high-priority" {
+		t.Fatalf("PriorityClassName() = %q, expected high-priority", got)
+	}
+}
+
 func TestFromStatefulSet_UpdateStrategy_OnDelete(t *testing.T) {
 	s := &appsv1.StatefulSet{Spec: appsv1.StatefulSetSpec{
 		UpdateStrategy: appsv1.StatefulSetUpdateStrategy{Type: appsv1.OnDeleteStatefulSetStrategyType},

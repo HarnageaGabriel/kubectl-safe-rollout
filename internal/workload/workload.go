@@ -115,6 +115,16 @@ type Workload interface {
 	// getter does not apply the default, keeping that decision visible to the
 	// caller.
 	ServiceAccountName() string
+	// PriorityClassName exposes spec.priorityClassName from the pod template.
+	// It is a single field on PodSpec, not per-container, unlike resource
+	// limits: there is exactly one name to resolve per workload. An empty
+	// string means unset (the pod priority defaults to the cluster default,
+	// or zero if there is none) and is a legitimate, common configuration,
+	// not something the caller should treat as "nothing to verify" the way
+	// ServiceAccountName's empty string still resolves to "default" — the two
+	// getters deliberately do not share that convention, see the doc comment
+	// on PodSpec.PriorityClassName in k8s.io/api/core/v1/types.go.
+	PriorityClassName() string
 	// RolloutComplete reports whether the rollout completed successfully:
 	// replicas are updated and available, and the controller observed the
 	// current Spec generation. Used by `watch` to stop observation on the
@@ -245,6 +255,11 @@ func (w *deploymentWorkload) ImagePullSecretNames() []string {
 // ServiceAccountName implements Workload.
 func (w *deploymentWorkload) ServiceAccountName() string {
 	return w.d.Spec.Template.Spec.ServiceAccountName
+}
+
+// PriorityClassName implements Workload.
+func (w *deploymentWorkload) PriorityClassName() string {
+	return w.d.Spec.Template.Spec.PriorityClassName
 }
 
 // RolloutComplete replicates the `kubectl rollout status` logic for

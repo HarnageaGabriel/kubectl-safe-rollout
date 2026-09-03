@@ -100,6 +100,11 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 			Name:         "data",
 			VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "restricted-data"}},
 		}},
+		// Gives priorityclass-exists something to actually Get (and be
+		// denied) too: without this, its early "unset" return would never
+		// touch the API and the scenario would prove nothing about its
+		// degrade path.
+		PriorityClassName: "restricted-priority",
 	}
 	d := deployWorkload(t, admin, ns, "restricted", 1, podSpec, nil)
 
@@ -136,6 +141,7 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 		check.QuotaHeadroom{},
 		check.HPAQuotaHeadroom{},
 		check.ServiceAccountExists{},
+		check.PriorityClassExists{},
 		check.ServiceRouting{},
 		check.IngressRouting{},
 		check.ConfigReferencesExist{},
@@ -176,8 +182,11 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 	// PersistentVolumeClaim the pod template's volume references (also
 	// not granted); network-policy-ingress needs to list networkpolicies
 	// (also not granted); hpa-quota-headroom needs to list
-	// horizontalpodautoscalers (also not granted).
-	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID} {
+	// horizontalpodautoscalers (also not granted); priorityclass-exists
+	// needs to get the PriorityClass the pod template names (also not
+	// granted — PriorityClass is cluster-scoped, and the Role above grants
+	// nothing in the scheduling.k8s.io API group at all).
+	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.PriorityClassExistsCheckID} {
 		if !contains(skipped, want) {
 			t.Errorf("check %q needs a resource the Role withholds and must skip, not fail or silently report clean (evaluated=%v, skipped=%v)", want, evaluated, skipped)
 		}

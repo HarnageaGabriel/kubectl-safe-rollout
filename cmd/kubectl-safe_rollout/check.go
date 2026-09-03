@@ -37,6 +37,7 @@ func registeredChecks() []check.Check {
 		check.QuotaHeadroom{},
 		check.HPAQuotaHeadroom{},
 		check.ServiceAccountExists{},
+		check.PriorityClassExists{},
 		check.ServiceRouting{},
 		check.IngressRouting{},
 		check.ConfigReferencesExist{},
