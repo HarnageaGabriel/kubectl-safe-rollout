@@ -56,7 +56,7 @@ func TestWatchE2E_ExhaustedQuota(t *testing.T) {
 			Command: []string{"sh", "-c", "sleep 3600"},
 		}},
 	}
-	d := deployWorkload(t, client, ns, "quota-esaurita", 2, podSpec, nil)
+	d := deployWorkload(t, client, ns, "quota-exhausted", 2, podSpec, nil)
 
 	watchAndExpectCause(t, client, ns, d, diagnose.CauseQuotaExceeded, 2*time.Minute)
 }
