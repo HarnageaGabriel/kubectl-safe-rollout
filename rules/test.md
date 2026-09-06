@@ -26,21 +26,20 @@
   quality criterion), in `test/e2e/`. They are isolated from the rest of the
   suite with the `e2e` build tag: they do not run in `go test ./...` or in CI
   (no cluster is available there), only with `make test-e2e` against an active
-  kind cluster (`make kind-up`). 19 of the suite's 20 scenarios pass on kind
-  v0.32 against Kubernetes v1.36.1, v1.35.5 and v1.34.8 (containerd 2.3.1): 16 failure scenarios cover the classified causes,
-  one successful slow-start regression guards against readiness false
-  positives, one proves graceful degradation under restricted RBAC, and one
-  proves a paused rollout is reported immediately. The 20th
-  (`serviceaccount-missing`) is newly added and not yet re-verified across
-  all three minors; do not remove this note without actually rerunning
-  `make test-e2e-versions`. Six StatefulSet e2e scenarios also exist in
-  `test/e2e/statefulset_test.go` (added alongside StatefulSet support in
-  `internal/workload`/`internal/diagnose`), not part of the 20-scenario
-  count above since they cover a second workload kind rather than an
-  additional cause: they have passed once, on kind v0.33 against
-  Kubernetes v1.37.0 (containerd 2.3.4), alongside the full Deployment
-  suite with zero regression — but not yet across the three pinned minors
-  the Deployment scenarios are verified against. Each scenario creates a disposable namespace
+  kind cluster (`make kind-up`). All 20 of the original Deployment
+  scenarios pass on kind against Kubernetes v1.36.1, v1.35.5 and v1.34.8
+  (`make test-e2e-versions`, most recently rerun 2026-09-06): 16 failure
+  scenarios cover the classified causes, one successful slow-start
+  regression guards against readiness false positives, one proves
+  graceful degradation under restricted RBAC (a real ServiceAccount +
+  Role + RoleBinding created on the cluster, not the default
+  admin-credentialed client), and one proves a paused rollout is
+  reported immediately. The six StatefulSet scenarios in
+  `test/e2e/statefulset_test.go` and the two
+  `scheduling-constraints-feasibility` scenarios in
+  `test/e2e/scheduling_test.go` are verified across the same three
+  minors as of the same run — do not remove this note without actually
+  rerunning `make test-e2e-versions`. Each scenario creates a disposable namespace
   and deletes it at the end of the test (`t.Cleanup`); always use real,
   redirectable image/registry references (Docker Hub, non-resolving DNS) to
   exercise real containerd/kubelet/scheduler error messages, never a
