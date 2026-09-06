@@ -233,3 +233,10 @@ func (w *statefulSetWorkload) Paused() bool {
 func (w *statefulSetWorkload) PendingRevisionUpdate() (updateRevision, currentRevision string, ok bool) {
 	return w.s.Status.UpdateRevision, w.s.Status.CurrentRevision, true
 }
+
+// VolumeClaimTemplates implements Workload: a direct passthrough of
+// spec.volumeClaimTemplates, the mechanism the controller uses to create one
+// real PersistentVolumeClaim per pod ordinal from each template.
+func (w *statefulSetWorkload) VolumeClaimTemplates() []corev1.PersistentVolumeClaim {
+	return w.s.Spec.VolumeClaimTemplates
+}

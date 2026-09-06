@@ -44,6 +44,7 @@ func registeredChecks() []check.Check {
 		check.IngressClassExists{},
 		check.ConfigReferencesExist{},
 		check.PVCExists{},
+		check.StorageClassExists{},
 		check.NetworkPolicyIngress{},
 		check.SchedulingConstraintsFeasibility{},
 		check.RequestsVsUsage{},

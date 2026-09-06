@@ -21,9 +21,11 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -220,6 +222,51 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 		t.Errorf("no check skipped: the Role deliberately withholds poddisruptionbudgets, resourcequotas, services, ingresses, and configmaps, so at least one must degrade (evaluated=%v)", evaluated)
 	}
 	t.Logf("under restricted RBAC: evaluated=%v skipped=%v", evaluated, skipped)
+
+	// storageclass-exists cannot be exercised through the Deployment-backed
+	// target above at all: Workload.VolumeClaimTemplates() always returns nil
+	// for a Deployment (the field does not exist on appsv1.DeploymentSpec),
+	// so the check short-circuits with zero API calls no matter what the Role
+	// grants. It needs a StatefulSet with a real volumeClaimTemplate instead
+	// — a second, separate target, not a variant of the loop above.
+	sts := deployStatefulSet(t, admin, ns, "restricted-sts", 1, corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name:    "app",
+			Image:   "busybox:1.36",
+			Command: []string{"sleep", "3600"},
+		}},
+	}, func(s *appsv1.StatefulSet) {
+		storageClass := "restricted-storage-class"
+		s.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{{
+			ObjectMeta: metav1.ObjectMeta{Name: "data"},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				StorageClassName: &storageClass,
+				AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+				},
+			},
+		}}
+	})
+	// check.Target wraps an already-fetched object (Workload), the same way
+	// the Deployment target above wraps a live Get result — but that Get
+	// itself needs no permission check here: the point of this scenario is
+	// storageclass-exists's own StorageClass Get, which no namespaced Role
+	// can ever grant regardless of what it says about statefulsets.
+	stsTarget := check.Target{
+		Namespace: ns,
+		Workload:  workload.FromStatefulSet(sts),
+		Client:    restricted,
+	}
+	stsRes, err := check.StorageClassExists{}.Run(ctx, stsTarget)
+	if err != nil {
+		t.Fatalf("storageclass-exists returned an error under restricted RBAC; the contract is to degrade with Skip, not to fail the run: %v", err)
+	}
+	if !stsRes.Skipped {
+		t.Errorf("storageclass-exists needs a cluster-scoped Get on StorageClass, which no namespaced Role can ever grant, and must skip (got Skipped=false, findings=%+v)", stsRes.Findings)
+	} else if strings.TrimSpace(stsRes.SkipReason) == "" {
+		t.Errorf("storageclass-exists skipped without a reason: a silent skip is indistinguishable from a clean result")
+	}
 }
 
 func contains(haystack []string, needle string) bool {
