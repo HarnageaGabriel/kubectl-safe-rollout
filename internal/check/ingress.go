@@ -68,12 +68,8 @@ func (c IngressRouting) Run(ctx context.Context, target Target) (Result, error) 
 	}
 
 	var findings []model.Finding
-	for _, ing := range ingList.Items {
-		relevant := false
+	for _, ing := range relevantIngresses(ingList.Items, servicesByName) {
 		if ing.Spec.DefaultBackend != nil && ing.Spec.DefaultBackend.Service != nil {
-			if _, ok := servicesByName[ing.Spec.DefaultBackend.Service.Name]; ok {
-				relevant = true
-			}
 			findings = append(findings, backendFindings(ing, servicesByName, *ing.Spec.DefaultBackend.Service)...)
 		}
 		for _, rule := range ing.Spec.Rules {
@@ -84,17 +80,52 @@ func (c IngressRouting) Run(ctx context.Context, target Target) (Result, error) 
 				if path.Backend.Service == nil {
 					continue
 				}
-				if _, ok := servicesByName[path.Backend.Service.Name]; ok {
-					relevant = true
-				}
 				findings = append(findings, backendFindings(ing, servicesByName, *path.Backend.Service)...)
 			}
 		}
-		if relevant {
-			findings = append(findings, tlsSecretFindings(ctx, target, ing)...)
-		}
+		findings = append(findings, tlsSecretFindings(ctx, target, ing)...)
 	}
 	return Result{CheckID: c.ID(), Findings: findings}, nil
+}
+
+// relevantIngresses returns the Ingresses whose DefaultBackend or at least
+// one rule backend names a Service in servicesByName, i.e. the Ingresses
+// that actually front the workload those Services were matched against.
+// Shared with ingressclass-exists, which needs the same "does this Ingress
+// front this workload" determination to decide which Ingresses' declared
+// IngressClass is worth resolving — kept as one helper so the two checks
+// cannot silently drift into two different definitions of "relevant" over
+// time.
+func relevantIngresses(ingresses []netv1.Ingress, servicesByName map[string]corev1.Service) []netv1.Ingress {
+	var relevant []netv1.Ingress
+	for _, ing := range ingresses {
+		if ingressReferencesServices(ing, servicesByName) {
+			relevant = append(relevant, ing)
+		}
+	}
+	return relevant
+}
+
+func ingressReferencesServices(ing netv1.Ingress, servicesByName map[string]corev1.Service) bool {
+	if ing.Spec.DefaultBackend != nil && ing.Spec.DefaultBackend.Service != nil {
+		if _, ok := servicesByName[ing.Spec.DefaultBackend.Service.Name]; ok {
+			return true
+		}
+	}
+	for _, rule := range ing.Spec.Rules {
+		if rule.HTTP == nil {
+			continue
+		}
+		for _, path := range rule.HTTP.Paths {
+			if path.Backend.Service == nil {
+				continue
+			}
+			if _, ok := servicesByName[path.Backend.Service.Name]; ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // tlsSecretFindings checks that every Secret an Ingress's spec.tls names
