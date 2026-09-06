@@ -47,6 +47,7 @@ func registeredChecks() []check.Check {
 		check.StorageClassExists{},
 		check.NetworkPolicyIngress{},
 		check.SchedulingConstraintsFeasibility{},
+		check.AdmissionWebhookVisibility{},
 		check.RequestsVsUsage{},
 		check.ProbeSanity{},
 		check.ResourceLimits{},

@@ -164,6 +164,7 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 		check.PVCExists{},
 		check.NetworkPolicyIngress{},
 		check.SchedulingConstraintsFeasibility{},
+		check.AdmissionWebhookVisibility{},
 		check.ProbeSanity{},
 		check.ResourceLimits{},
 		check.ImagePullSecrets{},
@@ -212,8 +213,15 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 	// (granted) AND a StatefulSet list (not granted — the Role above grants
 	// nothing on statefulsets at all): either list failing must Skip the
 	// whole check by design, so it lands here even though its Deployment
-	// list alone would have succeeded.
-	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.IngressClassExistsCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.PriorityClassExistsCheckID, check.SchedulingConstraintsFeasibilityCheckID, check.SelectorOverlapCheckID} {
+	// list alone would have succeeded. admission-webhook-visibility needs to
+	// list the cluster-scoped ValidatingWebhookConfiguration/
+	// MutatingWebhookConfiguration resources (also not granted — a
+	// namespaced Role can never grant anything in the
+	// admissionregistration.k8s.io API group either): unlike
+	// config-references-exist/pvc-exists, this needs no reference in the pod
+	// template to exercise its degrade path, since the very first read it
+	// performs is already cluster-scoped and denied.
+	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.IngressClassExistsCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.PriorityClassExistsCheckID, check.SchedulingConstraintsFeasibilityCheckID, check.SelectorOverlapCheckID, check.AdmissionWebhookVisibilityCheckID} {
 		if !contains(skipped, want) {
 			t.Errorf("check %q needs a resource the Role withholds and must skip, not fail or silently report clean (evaluated=%v, skipped=%v)", want, evaluated, skipped)
 		}
