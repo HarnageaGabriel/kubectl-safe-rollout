@@ -226,7 +226,13 @@ func TestWatchE2E_StatefulSet_OnDeletePendingUpdate(t *testing.T) {
 		live.Spec.Template.Spec.Containers[0].Command = []string{"sh", "-c", "sleep 7200"}
 	})
 
-	watchStatefulSetAndExpectCause(t, client, ns, updated, diagnose.CauseStatefulSetUpdateOnDelete, 2*time.Minute)
+	// 3m, not 2m: this call has flaked twice under a full-suite sequential
+	// run (context deadline exceeded around 126s) while consistently
+	// completing in ~12s run in isolation - resource contention from prior
+	// StatefulSet scenarios in the same cluster/VM, not a code issue. See
+	// the same reasoning already applied to the ordered-rolling-update
+	// scenario above.
+	watchStatefulSetAndExpectCause(t, client, ns, updated, diagnose.CauseStatefulSetUpdateOnDelete, 3*time.Minute)
 }
 
 // TestWatchE2E_StatefulSet_PartitionAtOrAboveReplicas verifies
@@ -249,7 +255,9 @@ func TestWatchE2E_StatefulSet_PartitionAtOrAboveReplicas(t *testing.T) {
 		}
 	})
 
-	watchStatefulSetAndExpectCause(t, client, ns, updated, diagnose.CauseStatefulSetPartitionBlocked, 2*time.Minute)
+	// 3m, not 2m: same flake pattern as OnDeletePendingUpdate above (this
+	// exact call timed out under full-suite load in a separate run).
+	watchStatefulSetAndExpectCause(t, client, ns, updated, diagnose.CauseStatefulSetPartitionBlocked, 3*time.Minute)
 }
 
 // TestWatchE2E_StatefulSet_CanaryPartitionCompletesWithoutFinding is the
@@ -277,7 +285,9 @@ func TestWatchE2E_StatefulSet_CanaryPartitionCompletesWithoutFinding(t *testing.
 		}
 	})
 
-	watchStatefulSetAndExpectSuccess(t, client, ns, updated, 2*time.Minute)
+	// 3m, not 2m: same post-mutation timing margin as the two scenarios
+	// above - this call has run as long as ~90s under full-suite load.
+	watchStatefulSetAndExpectSuccess(t, client, ns, updated, 3*time.Minute)
 }
 
 // TestWatchE2E_StatefulSet_ExhaustedQuota verifies quota-exceeded for
