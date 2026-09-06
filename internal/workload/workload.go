@@ -181,6 +181,19 @@ type Workload interface {
 	// matching the convention already established by
 	// ProgressDeadlineExceeded/Paused.
 	PendingRevisionUpdate() (updateRevision, currentRevision string, ok bool)
+	// VolumeClaimTemplates exposes spec.volumeClaimTemplates: StatefulSet's
+	// per-pod-ordinal PVC mechanism, where the controller creates one real
+	// PersistentVolumeClaim per pod ordinal (e.g. data-web-0, data-web-1)
+	// from each template. This is distinct from Volumes() (the pod
+	// template's volumes, which pvc-exists reads to find an
+	// already-existing PVC reference): a volumeClaimTemplate names a PVC
+	// that does not exist yet at check time, created lazily per ordinal as
+	// pods are scheduled. Deployment has no such field at all
+	// (appsv1.DeploymentSpec carries no volumeClaimTemplates): returning
+	// nil for it is a hard fact about the Deployment API, not a degraded
+	// case, the same convention already used by UpdateStrategy's Partition
+	// field for a StatefulSet-only concept with no Deployment equivalent.
+	VolumeClaimTemplates() []corev1.PersistentVolumeClaim
 }
 
 type deploymentWorkload struct {
@@ -367,4 +380,12 @@ func (w *deploymentWorkload) Paused() bool {
 // CurrentRevision, so this is never applicable.
 func (w *deploymentWorkload) PendingRevisionUpdate() (updateRevision, currentRevision string, ok bool) {
 	return "", "", false
+}
+
+// VolumeClaimTemplates implements Workload. Deployment has no
+// volumeClaimTemplates field at all (appsv1.DeploymentSpec carries no such
+// field): this always returns nil, a hard fact about the Deployment API,
+// not a placeholder standing in for "unknown".
+func (w *deploymentWorkload) VolumeClaimTemplates() []corev1.PersistentVolumeClaim {
+	return nil
 }
