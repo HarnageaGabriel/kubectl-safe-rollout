@@ -152,6 +152,7 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 		check.PDBConsistency{},
 		check.QuotaHeadroom{},
 		check.HPAQuotaHeadroom{},
+		check.SelectorOverlap{},
 		check.ServiceAccountExists{},
 		check.PriorityClassExists{},
 		check.ServiceRouting{},
@@ -205,8 +206,12 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 	// nothing in the scheduling.k8s.io API group at all);
 	// scheduling-constraints-feasibility needs to list the cluster-scoped
 	// nodes resource (also not granted — a namespaced Role can never grant
-	// it in the first place).
-	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.IngressClassExistsCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.PriorityClassExistsCheckID, check.SchedulingConstraintsFeasibilityCheckID} {
+	// it in the first place). selector-overlap needs both a Deployment list
+	// (granted) AND a StatefulSet list (not granted — the Role above grants
+	// nothing on statefulsets at all): either list failing must Skip the
+	// whole check by design, so it lands here even though its Deployment
+	// list alone would have succeeded.
+	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.IngressClassExistsCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.PriorityClassExistsCheckID, check.SchedulingConstraintsFeasibilityCheckID, check.SelectorOverlapCheckID} {
 		if !contains(skipped, want) {
 			t.Errorf("check %q needs a resource the Role withholds and must skip, not fail or silently report clean (evaluated=%v, skipped=%v)", want, evaluated, skipped)
 		}

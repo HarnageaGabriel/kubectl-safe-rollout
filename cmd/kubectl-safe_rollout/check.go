@@ -36,6 +36,7 @@ func registeredChecks() []check.Check {
 		check.PDBConsistency{},
 		check.QuotaHeadroom{},
 		check.HPAQuotaHeadroom{},
+		check.SelectorOverlap{},
 		check.ServiceAccountExists{},
 		check.PriorityClassExists{},
 		check.ServiceRouting{},
