@@ -138,10 +138,10 @@ type Outcome struct {
 	Results   []Result
 }
 
-// controllerObserver abstracts the differences between the two controller
-// kinds the watch loop supports, Deployment and StatefulSet, so
+// controllerObserver abstracts the differences between the controller kinds
+// the watch loop supports, Deployment, StatefulSet and DaemonSet, so
 // watchFromCurrentState/evaluateTick do not hardcode API calls for one kind.
-// Built for exactly these two; do not add speculative hooks for kinds this
+// Built for exactly these three; do not add speculative hooks for kinds this
 // project does not support yet (see workload.Workload's own doc comment).
 type controllerObserver interface {
 	// get reads the live controller object and returns it wrapped as a
@@ -173,6 +173,8 @@ func newControllerObserver(client kubernetes.Interface, kind string) (controller
 		return deploymentObserver{client: client}, nil
 	case "StatefulSet":
 		return statefulSetObserver{client: client}, nil
+	case "DaemonSet":
+		return daemonSetObserver{client: client}, nil
 	default:
 		return nil, fmt.Errorf("watch does not support kind %q", kind)
 	}
@@ -249,6 +251,81 @@ func (o statefulSetObserver) listWatch(namespace, name string) *cache.ListWatch 
 // call needed: wl already reflects the object read this tick by get.
 func (o statefulSetObserver) podCreationSources(_ context.Context, wl workload.Workload) ([]PodCreationSource, error) {
 	return []PodCreationSource{{Kind: "StatefulSet", Namespace: wl.Namespace(), Name: wl.Name(), UID: wl.UID()}}, nil
+}
+
+// daemonSetObserver's get/podCreationSources are verified against
+// k8s.io/kubernetes@v1.36.1's pkg/controller/daemon/daemon_controller.go
+// (fetched from the tagged source for this verification: the full
+// k8s.io/kubernetes module is not part of this project's module graph, only
+// k8s.io/api and k8s.io/apimachinery are). dsc.podControl.CreatePods is
+// called directly on the DaemonSet object itself (line ~1086: "err :=
+// dsc.podControl.CreatePods(ctx, ds.Namespace, podTemplate, ds, ...)"), with
+// no intermediate ReplicaSet: FailedCreate/SuccessfulCreate events land on
+// the DaemonSet, the same model already established for StatefulSet.
+//
+// Two DaemonSet-only event Reasons were investigated and deliberately left
+// unhandled by any Diagnoser:
+//   - FailedPlacementReason ("FailedPlacement"): declared as a constant in
+//     daemon_controller.go but never emitted anywhere in pkg/ or staging/ at
+//     this tag — dead code in this Kubernetes version, not a signal this
+//     tool can rely on arriving.
+//   - FailedDaemonPodReason ("FailedDaemonPod"): genuinely emitted, with a
+//     verified literal message ("Found failed daemon pod %s/%s on node %s,
+//     will try to kill it"), but the same code path immediately deletes that
+//     pod (podsToDelete) so the controller can recreate it on the next sync.
+//     The event names no cause, only that a replacement is coming: the real
+//     cause (why the pod reached Phase=Failed) surfaces on the replacement
+//     Pod through the existing Pod-level Diagnosers (CrashLoop, ImagePull,
+//     etc.) exactly as it already would without this event. A dedicated
+//     Finding here would duplicate whatever those Diagnosers already report,
+//     without adding a remediation any more specific than "wait for the
+//     replacement", so none was added.
+//
+// Known, accepted gap (not implemented in this phase, decided before writing
+// any code): a DaemonSet using updateStrategy.OnDelete with a pending update
+// produces no distinguishable Status signal at all — no
+// CurrentRevision/UpdateRevision pair (see
+// Workload.PendingRevisionUpdate's own doc comment) and no dedicated
+// condition, unlike StatefulSet's statefulset-update-ondelete/
+// statefulset-partition-blocked (see statefulsetupdate.go). Detecting it
+// would require comparing ControllerRevision hashes directly, out of scope
+// here. Consequence: RolloutComplete() reports "complete" (the old pods are
+// already Available) for a DaemonSet update that, under OnDelete, never
+// actually started — the same class of limitation this project already
+// states plainly elsewhere (see CLAUDE.md, "Non verificato senza cluster
+// reale") rather than leaving it silently unhandled.
+type daemonSetObserver struct {
+	client kubernetes.Interface
+}
+
+func (o daemonSetObserver) get(ctx context.Context, namespace, name string) (workload.Workload, string, error) {
+	d, err := o.client.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, "", err
+	}
+	return workload.FromDaemonSet(d), d.ResourceVersion, nil
+}
+
+func (o daemonSetObserver) listWatch(namespace, name string) *cache.ListWatch {
+	return &cache.ListWatch{
+		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
+			options.FieldSelector = fields.OneTermEqualSelector("metadata.name", name).String()
+			return o.client.AppsV1().DaemonSets(namespace).Watch(ctx, options)
+		},
+		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+			options.FieldSelector = fields.OneTermEqualSelector("metadata.name", name).String()
+			return o.client.AppsV1().DaemonSets(namespace).List(ctx, options)
+		},
+	}
+}
+
+// podCreationSources returns a single entry that IS the DaemonSet itself:
+// its controller creates Pods directly (no intermediate ReplicaSet, see this
+// type's own doc comment), so its own FailedCreate events already carry the
+// evidence Quota needs. No API call needed: wl already reflects the object
+// read this tick by get.
+func (o daemonSetObserver) podCreationSources(_ context.Context, wl workload.Workload) ([]PodCreationSource, error) {
+	return []PodCreationSource{{Kind: "DaemonSet", Namespace: wl.Namespace(), Name: wl.Name(), UID: wl.UID()}}, nil
 }
 
 // Watch observes workload pods through the Watch API (client-go/tools/
