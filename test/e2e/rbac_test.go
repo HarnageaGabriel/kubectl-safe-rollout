@@ -20,6 +20,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -28,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/check"
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/workload"
@@ -274,6 +276,72 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 		t.Errorf("storageclass-exists needs a cluster-scoped Get on StorageClass, which no namespaced Role can ever grant, and must skip (got Skipped=false, findings=%+v)", stsRes.Findings)
 	} else if strings.TrimSpace(stsRes.SkipReason) == "" {
 		t.Errorf("storageclass-exists skipped without a reason: a silent skip is indistinguishable from a clean result")
+	}
+
+	// pdb-daemonset-scale cannot be exercised through the Deployment-backed
+	// target above at all, and for a reason different from
+	// storageclass-exists: it does not short-circuit before touching the
+	// API because of a nil/empty field, it short-circuits on
+	// Workload.Kind() != "DaemonSet" and returns an evaluated, non-skipped,
+	// zero-finding Result without ever calling PodDisruptionBudgets().List
+	// — correct behavior for a Deployment target, but not a skip. Adding it
+	// to the main loop's "must skip" list above would assert something
+	// false about what the check actually does there. A third, separate
+	// target exercises its real degrade path: a DaemonSet with a
+	// maxUnavailable PodDisruptionBudget selecting it, read by the same
+	// restricted client the Role above denies poddisruptionbudgets to.
+	dsForPDB := deployDaemonSet(t, admin, ns, "restricted-ds", corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name:    "app",
+			Image:   "busybox:1.36",
+			Command: []string{"sleep", "3600"},
+		}},
+	}, nil)
+	// pdb-daemonset-scale reads Workload.Replicas() (desiredNumberScheduled)
+	// before ever listing PodDisruptionBudgets: a DaemonSet object read
+	// immediately after creation still has a zero status, which would make
+	// the check return early with the same "evaluated but never touched the
+	// API" outcome this fixture is specifically trying to avoid. Wait for
+	// the controller to populate it first, using the admin client (the
+	// point of this scenario is the PDB List call being denied, not the
+	// DaemonSet Get, and no namespaced Role could grant daemonsets access
+	// anyway since the Role above never mentions them).
+	if err := wait.PollUntilContextTimeout(ctx, 2*time.Second, 30*time.Second, true, func(pollCtx context.Context) (bool, error) {
+		live, err := admin.AppsV1().DaemonSets(ns).Get(pollCtx, dsForPDB.Name, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		dsForPDB = live
+		return live.Status.DesiredNumberScheduled > 0, nil
+	}); err != nil {
+		t.Fatalf("DaemonSet %s/%s never reported a nonzero desiredNumberScheduled: %v", ns, dsForPDB.Name, err)
+	}
+
+	dsMaxUnavailable := intstr.FromInt32(1)
+	dsPDB := &policyv1.PodDisruptionBudget{
+		ObjectMeta: metav1.ObjectMeta{Name: "restricted-ds", Namespace: ns},
+		Spec: policyv1.PodDisruptionBudgetSpec{
+			MaxUnavailable: &dsMaxUnavailable,
+			Selector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "restricted-ds"}},
+		},
+	}
+	if _, err := admin.PolicyV1().PodDisruptionBudgets(ns).Create(ctx, dsPDB, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("creating PodDisruptionBudget: %v", err)
+	}
+
+	dsTarget := check.Target{
+		Namespace: ns,
+		Workload:  workload.FromDaemonSet(dsForPDB),
+		Client:    restricted,
+	}
+	dsRes, err := check.PDBDaemonsetScale{}.Run(ctx, dsTarget)
+	if err != nil {
+		t.Fatalf("pdb-daemonset-scale returned an error under restricted RBAC; the contract is to degrade with Skip, not to fail the run: %v", err)
+	}
+	if !dsRes.Skipped {
+		t.Errorf("pdb-daemonset-scale needs to list PodDisruptionBudgets, which the Role withholds, and must skip (got Skipped=false, findings=%+v)", dsRes.Findings)
+	} else if strings.TrimSpace(dsRes.SkipReason) == "" {
+		t.Errorf("pdb-daemonset-scale skipped without a reason: a silent skip is indistinguishable from a clean result")
 	}
 }
 
