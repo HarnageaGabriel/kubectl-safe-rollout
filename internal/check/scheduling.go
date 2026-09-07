@@ -140,6 +140,26 @@ func (SchedulingConstraintsFeasibility) ID() string {
 
 // Run implements check.Check.
 func (c SchedulingConstraintsFeasibility) Run(ctx context.Context, target Target) (Result, error) {
+	if target.Workload.Kind() == "DaemonSet" {
+		// This check's entire capacity model does not transfer to
+		// DaemonSet, verified against daemon_controller.go/daemonset_util.go
+		// in k8s.io/kubernetes@v1.36.1: (a) the DaemonSet controller
+		// rewrites each pod's node affinity to pin it to one specific node
+		// before creating it (podutil.CreatePodTemplate /
+		// GetPodsAssignedToNode-style per-node NodeAffinity injection in
+		// daemonset_util.go), so the pod template this check reads is never
+		// what actually gets scheduled; (b) the controller also injects
+		// additional tolerations (including
+		// node.kubernetes.io/unschedulable) that Workload.Tolerations()
+		// cannot see, so this check's own cordoned-node exclusion would be
+		// wrong for DaemonSet pods, which tolerate being unschedulable by
+		// design; (c) topologySpreadConstraints on a DaemonSet is close to
+		// meaningless by construction — a DaemonSet already places one pod
+		// on every eligible node, so there is no spreading decision left
+		// for the constraint to make.
+		return Skip(c.ID(), "scheduling-constraints-feasibility does not apply to DaemonSet: the controller rewrites per-pod node affinity and injects additional tolerations before scheduling, which this check cannot see or model"), nil
+	}
+
 	replicas := target.Workload.Replicas()
 	if replicas == 0 {
 		return Result{CheckID: c.ID()}, nil

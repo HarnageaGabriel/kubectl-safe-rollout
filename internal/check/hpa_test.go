@@ -165,3 +165,28 @@ func TestHPAQuotaHeadroom_HPAListFailed_Skipped(t *testing.T) {
 		t.Error("SkipReason must not be empty")
 	}
 }
+
+// A DaemonSet has no /scale subresource: an HPA targeting one cannot ever
+// function, a different failure this check is not scoped to report. It
+// must not compute a Medium headroom finding on that false premise, and
+// (since it returns before any List call) must not even touch the API.
+func TestHPAQuotaHeadroom_DaemonSet_SkippedSilently(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "logger", Namespace: testNamespace},
+		Status:     appsv1.DaemonSetStatus{DesiredNumberScheduled: 3},
+	}
+	client := fake.NewSimpleClientset()
+	client.PrependReactor("list", "horizontalpodautoscalers", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		t.Fatal("must not list HorizontalPodAutoscalers for a DaemonSet target")
+		return false, nil, nil
+	})
+
+	target := check.Target{Namespace: testNamespace, Workload: workload.FromDaemonSet(ds), Client: client}
+	res, err := check.HPAQuotaHeadroom{}.Run(context.Background(), target)
+	if err != nil {
+		t.Fatalf("Run() returned an unexpected error: %v", err)
+	}
+	if res.Skipped || len(res.Findings) != 0 {
+		t.Fatalf("DaemonSet target: want empty, non-skipped result, got %+v", res)
+	}
+}

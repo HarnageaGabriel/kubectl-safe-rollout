@@ -353,3 +353,17 @@ func TestFromStatefulSet_PodRequests_InitContainers_Volumes_PodSelector(t *testi
 		t.Fatalf("PodSelector() = %q, expected only immutable selector app=db", got)
 	}
 }
+
+func TestFromStatefulSet_DesiredCount(t *testing.T) {
+	s := statefulSetBase()
+	count, observed := workload.FromStatefulSet(s).DesiredCount()
+	if count != 3 || !observed {
+		t.Fatalf("DesiredCount() = (%d, %v), expected (3, true)", count, observed)
+	}
+
+	s.Status.ObservedGeneration = 1
+	count, observed = workload.FromStatefulSet(s).DesiredCount()
+	if count != 3 || observed {
+		t.Fatalf("DesiredCount() = (%d, %v), expected (3, false) when generation is not yet observed", count, observed)
+	}
+}

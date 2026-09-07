@@ -151,7 +151,7 @@ func (c PDBConsistency) Run(ctx context.Context, target Target) (Result, error) 
 			),
 			Evidence: []string{fmt.Sprintf("replicas=%d", replicas), "matchingPodDisruptionBudgets=0"},
 			Remediation: model.Remediation{
-				Summary:          fmt.Sprintf("add a PodDisruptionBudget selecting %s's pods (for example maxUnavailable: 1) to bound how many replicas a concurrent drain can take at once; the right value depends on how many replicas can be lost in production", workloadRef),
+				Summary:          noPDBRemediationSummary(target.Workload.Kind(), workloadRef),
 				ContextDependent: true,
 			},
 			Resource: model.ResourceRef{Kind: target.Workload.Kind(), Namespace: target.Namespace, Name: target.Workload.Name()},
@@ -189,6 +189,30 @@ func allowedDisruptions(minAvailable, maxUnavailable *intstr.IntOrString, replic
 		allowed = 0
 	}
 	return allowed, mode, nil
+}
+
+// noPDBRemediationSummary produces the "add a PodDisruptionBudget" advice
+// for a workload with no matching PDB. DaemonSet needs a different shape of
+// advice than Deployment/StatefulSet: DaemonSet pods are not owned by
+// anything with a /scale subresource (see pdb-daemonset-scale), so a PDB
+// using maxUnavailable in any form, or minAvailable expressed as a
+// percentage, leaves the in-tree disruption controller permanently unable
+// to compute disruptionsAllowed for it (status.conditions shows
+// DisruptionAllowed=False, Reason=SyncFailed, forever, not just until the
+// next reconcile). Suggesting maxUnavailable here, the advice this check
+// already gives for Deployment/StatefulSet, would recommend exactly the
+// misconfiguration pdb-daemonset-scale exists to catch.
+func noPDBRemediationSummary(kind, workloadRef string) string {
+	if kind == "DaemonSet" {
+		return fmt.Sprintf(
+			"add a PodDisruptionBudget selecting %s's pods using an integer minAvailable (for example minAvailable: 1); DaemonSet pods have no /scale subresource, so maxUnavailable (in any form) or a percentage minAvailable would leave the PDB permanently unable to compute disruptionsAllowed (see pdb-daemonset-scale) — the right integer value depends on how many replicas can be lost in production",
+			workloadRef,
+		)
+	}
+	return fmt.Sprintf(
+		"add a PodDisruptionBudget selecting %s's pods (for example maxUnavailable: 1) to bound how many replicas a concurrent drain can take at once; the right value depends on how many replicas can be lost in production",
+		workloadRef,
+	)
 }
 
 func pdbSpecValue(minAvailable, maxUnavailable *intstr.IntOrString) string {

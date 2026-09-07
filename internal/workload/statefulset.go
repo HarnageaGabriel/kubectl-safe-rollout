@@ -162,27 +162,45 @@ func (w *statefulSetWorkload) SchedulerName() string {
 	return w.s.Spec.Template.Spec.SchedulerName
 }
 
-// RolloutComplete replicates the public contract of `kubectl rollout status`
-// for StatefulSet. k8s.io/kubectl (pkg/polymorphichelpers, the package that
-// owns StatefulSetStatusViewer) is NOT a dependency of this module and is not
-// present in go.sum/the module cache, so this method could not be checked
-// against the authoritative vendored source the way deploymentWorkload's
-// RolloutComplete was. It is implemented instead from the well-documented,
-// stable StatefulSetStatus field contract (ObservedGeneration,
-// ReadyReplicas, UpdatedReplicas, CurrentReplicas, CurrentRevision,
-// UpdateRevision) and from the publicly known behavior of `kubectl rollout
-// status` on a StatefulSet. Flagging this explicitly: unverified against
-// vendored source.
+// RolloutComplete has now been checked line by line against the real
+// StatefulSetStatusViewer.Status implementation in
+// k8s.io/kubectl@v0.36.3/pkg/polymorphichelpers/rollout_status.go, lines
+// 120-152 (present in this module's build cache even though k8s.io/kubectl
+// is not a go.mod dependency of this project; it is not imported here).
+// That method: rejects any strategy type other than RollingUpdate outright
+// (line 127-129); waits for ObservedGeneration to catch up (line 130-132);
+// waits for ReadyReplicas to reach the desired count (line 133-135); then,
+// because line 127 has already guaranteed the strategy type is
+// RollingUpdate, the "if ... Type == RollingUpdate" guard at line 136 is
+// always true, so it always returns done=true at line 143-144 as soon as
+// the (optional) Partition threshold on UpdatedReplicas is satisfied. The
+// UpdateRevision/CurrentRevision comparison at lines 146-150 is dead code
+// in the real controller: that branch can never execute, because the only
+// way past line 136 without returning is a strategy type that line 127-129
+// already rejected.
 //
-// Divergence from kubectl deliberately kept, per an explicit product
-// decision for this project: kubectl refuses to report status at all for
-// OnDeleteStatefulSetStrategyType (it returns an error telling the user
-// rollout status is only available for RollingUpdate). This method does not
-// refuse: once the generation and readiness checks pass, it reports the
-// rollout complete under OnDelete too, because a dedicated diagnoser for
-// "pending OnDelete update" is planned for `watch` (Phase B of StatefulSet
-// support) and RolloutComplete must not block `check`/future `watch` forever
-// on a strategy type it is allowed to not track precisely.
+// This method is deliberately stricter than that real, shipped behavior:
+// when Partition is unset, it still requires
+// Status.UpdateRevision == Status.CurrentRevision before declaring the
+// rollout complete, a comparison `kubectl rollout status` itself never
+// actually performs. This is a conscious choice, not an oversight: for a
+// pre-flight/diagnosis tool, a false negative (reporting "not complete yet"
+// for a StatefulSet that `kubectl rollout status` would already call done)
+// is a far cheaper mistake than a false positive (`watch` declaring success
+// while old-revision pods are still present). Revision convergence is the
+// more precise definition of "done" for a rolling update; the fact that the
+// upstream CLI does not check it is closer to a historical accident of that
+// code path than a deliberate contract this project should replicate
+// exactly.
+//
+// Divergence from kubectl also deliberately kept for OnDelete: kubectl
+// refuses to report status at all for OnDeleteStatefulSetStrategyType (line
+// 127-129, same guard). This method does not refuse: once the generation
+// and readiness checks pass, it reports the rollout complete under OnDelete
+// too, because a dedicated diagnoser for "pending OnDelete update" is
+// planned for `watch` (Phase B of StatefulSet support) and RolloutComplete
+// must not block `check`/future `watch` forever on a strategy type it is
+// allowed to not track precisely.
 func (w *statefulSetWorkload) RolloutComplete() bool {
 	s := w.s
 	if s.Generation > s.Status.ObservedGeneration {
@@ -239,4 +257,11 @@ func (w *statefulSetWorkload) PendingRevisionUpdate() (updateRevision, currentRe
 // real PersistentVolumeClaim per pod ordinal from each template.
 func (w *statefulSetWorkload) VolumeClaimTemplates() []corev1.PersistentVolumeClaim {
 	return w.s.Spec.VolumeClaimTemplates
+}
+
+// DesiredCount implements Workload: same generation-catch-up check already
+// used by RolloutComplete, reused rather than duplicated with a different
+// definition.
+func (w *statefulSetWorkload) DesiredCount() (count int32, observed bool) {
+	return w.Replicas(), w.s.Generation <= w.s.Status.ObservedGeneration
 }

@@ -297,3 +297,39 @@ func TestConfigReferencesExist_ReadFailed_Skipped(t *testing.T) {
 		t.Error("SkipReason must not be empty")
 	}
 }
+
+// DaemonSet is a plain pod-template passthrough for this check: it reads
+// only Workload.PodContainers()/InitContainers()/Volumes(), all generic
+// accessors already exercised by the Deployment tests above. A single
+// smoke test demonstrates the passthrough works, not a full test suite.
+func TestConfigReferencesExist_DaemonSet_EnvFromConfigMapMissing_HighFinding(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "logger", Namespace: testNamespace},
+		Spec: appsv1.DaemonSetSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:    "app",
+						Image:   "nginx:1.27",
+						EnvFrom: []corev1.EnvFromSource{{ConfigMapRef: &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "app-config"}}}},
+					}},
+				},
+			},
+		},
+	}
+	client := fake.NewSimpleClientset()
+	result, err := check.ConfigReferencesExist{}.Run(context.Background(), check.Target{
+		Namespace: testNamespace,
+		Workload:  workload.FromDaemonSet(ds),
+		Client:    client,
+	})
+	if err != nil {
+		t.Fatalf("Run() returned an unexpected error: %v", err)
+	}
+	if result.Skipped || len(result.Findings) != 1 {
+		t.Fatalf("want one non-skipped finding for the DaemonSet-backed target, got %+v", result)
+	}
+	if !strings.Contains(result.Findings[0].Cause, "app-config") {
+		t.Errorf("cause must name the missing ConfigMap, got %q", result.Findings[0].Cause)
+	}
+}

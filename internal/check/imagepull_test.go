@@ -274,3 +274,40 @@ func TestImagePullSecrets_ServiceAccountReadFailed_Skipped(t *testing.T) {
 		t.Error("SkipReason must not be empty")
 	}
 }
+
+// DaemonSet is a plain pod-template/ServiceAccount passthrough for this
+// check, same mechanism as Deployment above. A single smoke test
+// demonstrates it.
+func TestImagePullSecrets_DaemonSet_DeclaredSecretDoesNotExist_MediumFinding(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "logger", Namespace: testNamespace},
+		Spec: appsv1.DaemonSetSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers:       []corev1.Container{{Name: "app", Image: "registry.internal:5000/logger:v1"}},
+					ImagePullSecrets: []corev1.LocalObjectReference{{Name: "totally-does-not-exist"}},
+				},
+			},
+		},
+	}
+	serviceAccount := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: testNamespace}}
+	client := fake.NewSimpleClientset(serviceAccount)
+
+	result, err := check.ImagePullSecrets{}.Run(context.Background(), check.Target{
+		Namespace: testNamespace,
+		Workload:  workload.FromDaemonSet(ds),
+		Client:    client,
+	})
+	if err != nil {
+		t.Fatalf("Run() returned an unexpected error: %v", err)
+	}
+	if result.Skipped || len(result.Findings) != 1 {
+		t.Fatalf("want one non-skipped finding for the DaemonSet-backed target, got %+v", result)
+	}
+	if result.Findings[0].Severity != model.SeverityMedium {
+		t.Errorf("severity = %v, want Medium", result.Findings[0].Severity)
+	}
+	if !strings.Contains(result.Findings[0].Cause, "totally-does-not-exist") {
+		t.Errorf("cause must name the missing Secret, got %q", result.Findings[0].Cause)
+	}
+}

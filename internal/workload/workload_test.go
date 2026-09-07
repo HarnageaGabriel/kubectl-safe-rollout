@@ -340,3 +340,21 @@ func TestFromDeployment_ProgressDeadlineExceeded(t *testing.T) {
 		t.Fatal("unexpired Progressing condition must not be reported as deadline exceeded")
 	}
 }
+
+func TestFromDeployment_DesiredCount(t *testing.T) {
+	d := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Generation: 3},
+		Spec:       appsv1.DeploymentSpec{Replicas: int32Ptr(4)},
+		Status:     appsv1.DeploymentStatus{ObservedGeneration: 3},
+	}
+	count, observed := workload.FromDeployment(d).DesiredCount()
+	if count != 4 || !observed {
+		t.Fatalf("DesiredCount() = (%d, %v), expected (4, true)", count, observed)
+	}
+
+	d.Status.ObservedGeneration = 2
+	count, observed = workload.FromDeployment(d).DesiredCount()
+	if count != 4 || observed {
+		t.Fatalf("DesiredCount() = (%d, %v), expected (4, false) when generation is not yet observed", count, observed)
+	}
+}

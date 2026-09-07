@@ -120,6 +120,43 @@ func TestStorageClassExists_NoVolumeClaimTemplates_NoFindingsNoAPICalls(t *testi
 	}
 }
 
+// A DaemonSet-backed Target must also produce zero findings with zero API
+// calls: DaemonSetSpec has no volumeClaimTemplates field at all, so
+// Workload.VolumeClaimTemplates() already returns nil unconditionally, the
+// same hard fact already true for Deployment above.
+func TestStorageClassExists_DaemonSetBacked_NoFindingsNoAPICalls(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "logger", Namespace: testNamespace},
+		Spec: appsv1.DaemonSetSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx:1.27"}}},
+			},
+		},
+	}
+	client := fake.NewSimpleClientset()
+
+	var storageClassGot bool
+	client.PrependReactor("get", "storageclasses", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		storageClassGot = true
+		return false, nil, nil
+	})
+
+	result, err := check.StorageClassExists{}.Run(context.Background(), check.Target{
+		Namespace: testNamespace,
+		Workload:  workload.FromDaemonSet(ds),
+		Client:    client,
+	})
+	if err != nil {
+		t.Fatalf("Run() returned an unexpected error: %v", err)
+	}
+	if result.Skipped || len(result.Findings) != 0 {
+		t.Fatalf("DaemonSet has no volumeClaimTemplates: want empty result, got %+v", result)
+	}
+	if storageClassGot {
+		t.Error("StorageClass get must not be attempted for a DaemonSet-backed target")
+	}
+}
+
 // 3. A nil storageClassName means "use the cluster's default StorageClass":
 // a legitimate configuration, not flagged.
 func TestStorageClassExists_NilStorageClassName_NoFindings(t *testing.T) {
