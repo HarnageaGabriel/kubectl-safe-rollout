@@ -623,3 +623,44 @@ func TestSchedulingConstraintsFeasibility_StatefulSet_AntiAffinityInfeasible_Hig
 		t.Errorf("cause must name the StatefulSet workload, got %q", f.Cause)
 	}
 }
+
+// DaemonSet must always Skip, without ever calling the Node API: the
+// controller rewrites per-pod node affinity and injects additional
+// tolerations before scheduling, which this check's capacity model cannot
+// see, even when the pod template declares a topology spread constraint
+// that would trigger a finding for Deployment/StatefulSet.
+func TestSchedulingConstraintsFeasibility_DaemonSet_AlwaysSkipped(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "logger", Namespace: testNamespace},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: podLabels()},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: podLabels()},
+				Spec: corev1.PodSpec{
+					Affinity: selfAntiAffinity(hostnameKey),
+				},
+			},
+		},
+		Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 3},
+	}
+	client := fake.NewSimpleClientset()
+	client.PrependReactor("list", "nodes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		t.Fatal("must not list Nodes for a DaemonSet target")
+		return false, nil, nil
+	})
+
+	res, err := check.SchedulingConstraintsFeasibility{}.Run(context.Background(), check.Target{
+		Namespace: testNamespace,
+		Workload:  workload.FromDaemonSet(ds),
+		Client:    client,
+	})
+	if err != nil {
+		t.Fatalf("Run() returned an unexpected error: %v", err)
+	}
+	if !res.Skipped {
+		t.Fatalf("want Skipped=true for a DaemonSet target, got %+v", res)
+	}
+	if res.SkipReason == "" {
+		t.Error("SkipReason must not be empty")
+	}
+}

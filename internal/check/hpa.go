@@ -53,6 +53,19 @@ func (HPAQuotaHeadroom) ID() string { return HPAQuotaHeadroomCheckID }
 
 // Run implements check.Check.
 func (c HPAQuotaHeadroom) Run(ctx context.Context, target Target) (Result, error) {
+	if target.Workload.Kind() == "DaemonSet" {
+		// An HPA with scaleTargetRef.Kind: DaemonSet is accepted by the
+		// apiserver but can never actually work: DaemonSet has no /scale
+		// subresource (verified in pdb-daemonset-scale's doc comment,
+		// k8s.io/api@v0.37.0/apps/v1/types.go), so the HPA controller can
+		// never read or write a current/desired replica count for it. The
+		// calculation below (maxReplicas - desiredCount) would compute a
+		// Medium finding on a false premise: the real problem is not
+		// "headroom is short", it is "this HPA cannot function at all",
+		// a different failure this check is not scoped to report.
+		return Result{CheckID: c.ID()}, nil
+	}
+
 	hpaList, err := target.Client.AutoscalingV2().HorizontalPodAutoscalers(target.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return Skip(c.ID(), fmt.Sprintf("HorizontalPodAutoscaler list is not accessible: %v", err)), nil

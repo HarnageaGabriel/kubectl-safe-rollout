@@ -29,9 +29,9 @@ import (
 // SelectorOverlapCheckID is the stable identifier for this check.
 const SelectorOverlapCheckID = "selector-overlap"
 
-// SelectorOverlap flags a Deployment or StatefulSet whose pod selector
-// overlaps another Deployment's or StatefulSet's pod template labels in the
-// same namespace.
+// SelectorOverlap flags a Deployment, StatefulSet or DaemonSet whose pod
+// selector overlaps another Deployment's, StatefulSet's or DaemonSet's pod
+// template labels in the same namespace.
 //
 // This is NOT "two live controllers steal each other's pods": that scenario
 // is verified false in vanilla Kubernetes. ControllerRef plus the
@@ -64,14 +64,14 @@ const SelectorOverlapCheckID = "selector-overlap"
 // workload's replica count: there is no live blockage today, matching the
 // "concrete but nondeterministic risk" bar already used for
 // hpa-quota-headroom and requests-vs-usage. spec.selector is immutable on
-// both Deployment and StatefulSet, so an overlap is permanent and one
-// `kubectl scale`/orphaning event away from live regardless of how many
-// replicas the other workload currently runs — that replica count is
+// Deployment, StatefulSet and DaemonSet alike, so an overlap is permanent
+// and one `kubectl scale`/orphaning event away from live regardless of how
+// many replicas the other workload currently runs — that replica count is
 // recorded in Evidence instead.
 //
 // Scope, v1 limitations stated explicitly rather than left silent:
-//   - only Deployment and StatefulSet are compared, matching the two kinds
-//     internal/workload supports today. DaemonSet, Job, and CronJob are
+//   - Deployment, StatefulSet and DaemonSet are compared, matching the
+//     three kinds internal/workload supports today. Job and CronJob are
 //     mechanically exposed to the same real controller mechanism but are
 //     out of scope for this version, the same kind of stated limitation as
 //     pvc-exists not seeing spec.volumeClaimTemplates.
@@ -115,13 +115,20 @@ func (c SelectorOverlap) Run(ctx context.Context, target Target) (Result, error)
 	if err != nil {
 		return Skip(c.ID(), fmt.Sprintf("statefulset list is not accessible: %v", err)), nil
 	}
+	dsList, err := target.Client.AppsV1().DaemonSets(target.Namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return Skip(c.ID(), fmt.Sprintf("daemonset list is not accessible: %v", err)), nil
+	}
 
-	candidates := make([]workload.Workload, 0, len(deployList.Items)+len(stsList.Items))
+	candidates := make([]workload.Workload, 0, len(deployList.Items)+len(stsList.Items)+len(dsList.Items))
 	for i := range deployList.Items {
 		candidates = append(candidates, workload.FromDeployment(&deployList.Items[i]))
 	}
 	for i := range stsList.Items {
 		candidates = append(candidates, workload.FromStatefulSet(&stsList.Items[i]))
+	}
+	for i := range dsList.Items {
+		candidates = append(candidates, workload.FromDaemonSet(&dsList.Items[i]))
 	}
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].Kind() != candidates[j].Kind() {
@@ -177,11 +184,11 @@ func (c SelectorOverlap) Run(ctx context.Context, target Target) (Result, error)
 			Evidence: evidence,
 			Remediation: model.Remediation{
 				Summary: fmt.Sprintf(
-					"spec.selector is immutable on both Deployment and StatefulSet: fixing this means recreating one of %s or %s with a distinguishing label, which deletes that workload's pods. Which of the two is misconfigured is a judgment call this tool cannot make.",
+					"spec.selector is immutable on Deployment, StatefulSet and DaemonSet alike: fixing this means recreating one of %s or %s with a distinguishing label, which deletes that workload's pods. Which of the two is misconfigured is a judgment call this tool cannot make.",
 					workloadRef, otherRef,
 				),
 				Commands: []string{
-					fmt.Sprintf("kubectl get deploy,sts -n %s -o custom-columns=KIND:.kind,NAME:.metadata.name,SELECTOR:.spec.selector.matchLabels", target.Namespace),
+					fmt.Sprintf("kubectl get deploy,sts,ds -n %s -o custom-columns=KIND:.kind,NAME:.metadata.name,SELECTOR:.spec.selector.matchLabels", target.Namespace),
 				},
 				ContextDependent: true,
 			},

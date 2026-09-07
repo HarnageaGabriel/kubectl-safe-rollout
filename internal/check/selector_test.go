@@ -59,6 +59,18 @@ func selectorOverlapStatefulSet(uid types.UID, name string, selectorLabels, podT
 	}
 }
 
+func selectorOverlapDaemonSet(uid types.UID, name string, selectorLabels, podTemplateLabels map[string]string) *appsv1.DaemonSet {
+	return &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace, UID: uid},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: selectorLabels},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: podTemplateLabels},
+			},
+		},
+	}
+}
+
 func runSelectorOverlapCheck(t *testing.T, target workload.Workload, objects ...runtime.Object) check.Result {
 	t.Helper()
 	client := fake.NewSimpleClientset(objects...)
@@ -284,6 +296,45 @@ func TestSelectorOverlap_StatefulSetListDenied_SkippedNamingStatefulSetSpecifica
 	}
 	if strings.Contains(result.SkipReason, "deployment list") {
 		t.Errorf("skip reason must not be the Deployment-list message reused for a different failure, got %q", result.SkipReason)
+	}
+}
+
+func TestSelectorOverlap_DaemonSetListDenied_SkippedNamingDaemonSetSpecifically(t *testing.T) {
+	targetLabels := map[string]string{"app": "checkout"}
+	target := selectorOverlapDeployment("target-uid", "checkout", targetLabels, targetLabels, 1)
+	client := fake.NewSimpleClientset(target)
+	client.PrependReactor("list", "daemonsets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("forbidden: RBAC denies listing DaemonSets")
+	})
+
+	result, err := check.SelectorOverlap{}.Run(context.Background(), check.Target{
+		Namespace: testNamespace,
+		Workload:  workload.FromDeployment(target),
+		Client:    client,
+	})
+	if err != nil {
+		t.Fatalf("Run() must not return an error on a failed list; it must degrade to Skipped: %v", err)
+	}
+	if !result.Skipped {
+		t.Fatal("want Skipped=true when the DaemonSet list is not accessible, even though the Deployment/StatefulSet lists succeeded")
+	}
+	if !strings.Contains(result.SkipReason, "daemonset") {
+		t.Errorf("skip reason must specifically name \"daemonset\", got %q", result.SkipReason)
+	}
+}
+
+func TestSelectorOverlap_CrossKindDaemonSetCollision_FlaggedNamingOtherKind(t *testing.T) {
+	targetLabels := map[string]string{"app": "checkout"}
+	target := selectorOverlapDeployment("target-uid", "checkout", targetLabels, targetLabels, 1)
+	other := selectorOverlapDaemonSet("other-uid", "checkout-logger", targetLabels, targetLabels)
+
+	result := runSelectorOverlapCheck(t, workload.FromDeployment(target), target, other)
+	if result.Skipped || len(result.Findings) != 1 {
+		t.Fatalf("want exactly one non-skipped finding for a cross-kind collision, got %+v", result)
+	}
+	f := result.Findings[0]
+	if !contains(f.Evidence, "otherKind=DaemonSet") {
+		t.Errorf("evidence must name the other workload's kind, got %+v", f.Evidence)
 	}
 }
 

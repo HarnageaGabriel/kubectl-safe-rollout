@@ -17,6 +17,7 @@ package check_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -260,5 +261,44 @@ func TestPDBConsistency_ListFailed_Skipped(t *testing.T) {
 	}
 	if res.SkipReason == "" {
 		t.Errorf("SkipReason must not be empty")
+	}
+}
+
+// DaemonSet pods have no /scale subresource: recommending maxUnavailable
+// here would recommend exactly the misconfiguration pdb-daemonset-scale
+// exists to catch. The "no PDB" remediation must say minAvailable as an
+// integer instead.
+func TestPDBConsistency_NoPDB_DaemonSet_RemediationSuggestsIntegerMinAvailable(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "logger", Namespace: testNamespace},
+		Spec: appsv1.DaemonSetSpec{
+			Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: podLabels()}},
+		},
+		Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 3},
+	}
+	client := fake.NewSimpleClientset(ds)
+	target := check.Target{
+		Namespace: testNamespace,
+		Workload:  workload.FromDaemonSet(ds),
+		Client:    client,
+	}
+
+	res, err := check.PDBConsistency{}.Run(context.Background(), target)
+	if err != nil {
+		t.Fatalf("Run() returned an unexpected error: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("want 1 finding for a multi-replica DaemonSet with no PDB, got %d: %+v", len(res.Findings), res.Findings)
+	}
+	f := res.Findings[0]
+	if f.Severity != model.SeverityLow {
+		t.Errorf("severity = %v, want Low", f.Severity)
+	}
+	summary := f.Remediation.Summary
+	if !strings.Contains(summary, "minAvailable: 1") {
+		t.Errorf("remediation must recommend an integer minAvailable, got: %q", summary)
+	}
+	if strings.Contains(summary, "maxUnavailable: 1") {
+		t.Errorf("remediation must not recommend maxUnavailable for a DaemonSet (no /scale subresource, see pdb-daemonset-scale), got: %q", summary)
 	}
 }
