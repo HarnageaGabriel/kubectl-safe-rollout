@@ -264,6 +264,74 @@ func TestPDBConsistency_ListFailed_Skipped(t *testing.T) {
 	}
 }
 
+// Regression: maxUnavailable must round up like the real in-tree PDB
+// controller (k8s.io/kubernetes@v1.36.1
+// pkg/controller/disruption/disruption.go, GetPodDisruptionsAllowed calls
+// GetScaledValueFromIntOrPercent with roundUp=true for maxUnavailable).
+// Rounding down instead, as this check used to do, computed
+// floor(25%*3)=0 and reported a false High "leaves no disruption
+// headroom" finding for a PDB the real controller treats as perfectly
+// healthy (ceil(25%*3)=1).
+func TestPDBConsistency_MaxUnavailablePercent25_RoundsUp_NoFindings(t *testing.T) {
+	twentyFive := intstr.FromString("25%")
+	res := runPDBCheck(t,
+		deployment(3, rollingUpdateStrategy(nil)),
+		pdb("checkout-pdb", podLabels(), nil, intstrPtr(twentyFive)),
+	)
+
+	if len(res.Findings) != 0 {
+		t.Fatalf("maxUnavailable: 25%% on 3 replicas rounds up to 1 allowed disruption (ceil(0.75)=1): want 0 findings, got %+v", res.Findings)
+	}
+}
+
+// Same rounding fix, verified against the exact disruptionsAllowed value
+// rather than just "no finding": maxUnavailable: 50% on 3 replicas is
+// ceil(1.5)=2, not floor(1.5)=1. A plain RollingUpdate deployment with
+// this budget produces no finding at all (Evidence is only attached to
+// findings), so this uses the Recreate-strategy branch instead, which
+// reports disruptionsAllowed even when allowed > 0 as long as it is below
+// replicas (2 < 3 here) — the only place in this check where the
+// computed value is directly observable.
+func TestPDBConsistency_MaxUnavailablePercent50_RoundsUp_ReportsCorrectAllowed(t *testing.T) {
+	fifty := intstr.FromString("50%")
+	res := runPDBCheck(t,
+		deployment(3, recreateStrategy()),
+		pdb("checkout-pdb", podLabels(), nil, intstrPtr(fifty)),
+	)
+
+	if len(res.Findings) != 1 {
+		t.Fatalf("want 1 finding for Recreate with maxUnavailable: 50%% on 3 replicas (disruptionsAllowed=2 < 3 replicas), got %+v", res.Findings)
+	}
+	f := res.Findings[0]
+	found := false
+	for _, e := range f.Evidence {
+		if e == "disruptionsAllowed=2" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("evidence must report disruptionsAllowed=2 (ceil(1.5)=2), got %+v", f.Evidence)
+	}
+}
+
+// minAvailable already rounded up before this fix (verified against the
+// same vendored controller source): this branch must be unaffected.
+// minAvailable: 100% on 3 replicas is ceil(3)=3, so disruptionsAllowed=0.
+func TestPDBConsistency_MinAvailablePercent100_StillHigh(t *testing.T) {
+	hundred := intstr.FromString("100%")
+	res := runPDBCheck(t,
+		deployment(3, rollingUpdateStrategy(nil)),
+		pdb("checkout-pdb", podLabels(), intstrPtr(hundred), nil),
+	)
+
+	if len(res.Findings) != 1 {
+		t.Fatalf("want 1 finding for minAvailable: 100%% on 3 replicas, got %+v", res.Findings)
+	}
+	if res.Findings[0].Severity != model.SeverityHigh {
+		t.Errorf("severity = %v, want High", res.Findings[0].Severity)
+	}
+}
+
 // DaemonSet pods have no /scale subresource: recommending maxUnavailable
 // here would recommend exactly the misconfiguration pdb-daemonset-scale
 // exists to catch. The "no PDB" remediation must say minAvailable as an
