@@ -94,7 +94,17 @@ func (c PDBDaemonsetScale) Run(ctx context.Context, target Target) (Result, erro
 	var findings []model.Finding
 	for _, pdb := range pdbList.Items {
 		selector, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
-		if err != nil || selector.Empty() || !selector.Matches(podLabels) {
+		// No selector.Empty() guard: see the identical reasoning in
+		// pdb-consistency (internal/check/pdb.go). A nil Selector already
+		// resolves to labels.Nothing() and is filtered out by Matches below
+		// on its own; an explicit empty ({}) Selector resolves to
+		// labels.Everything() (Empty()==true) but the API contract
+		// (k8s.io/api@v0.37.0 policy/v1/types.go, line 38) and the real
+		// eviction handler (k8s.io/kubernetes@v1.36.1
+		// pkg/registry/core/pod/storage/eviction.go,
+		// getPodDisruptionBudgets, lines 498-505) both treat it as matching
+		// every pod in the namespace, including this DaemonSet's.
+		if err != nil || !selector.Matches(podLabels) {
 			continue
 		}
 

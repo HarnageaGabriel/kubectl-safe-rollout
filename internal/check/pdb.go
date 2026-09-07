@@ -72,7 +72,21 @@ func (c PDBConsistency) Run(ctx context.Context, target Target) (Result, error) 
 	matchedPDB := false
 	for _, pdb := range pdbList.Items {
 		selector, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
-		if err != nil || selector.Empty() || !selector.Matches(podLabels) {
+		// No selector.Empty() guard here: a nil Selector already resolves to
+		// labels.Nothing() (Matches always false, so it is filtered out by
+		// the Matches check below on its own), but an explicit empty ({})
+		// Selector resolves to labels.Everything() and DOES have
+		// Empty()==true — yet the API contract says it matches every pod in
+		// the namespace (k8s.io/api@v0.37.0 policy/v1/types.go, line 38:
+		// "A null selector will match no pods, while an empty ({}) selector
+		// will select all pods within the namespace"), and the real eviction
+		// handler enforces exactly that (k8s.io/kubernetes@v1.36.1
+		// pkg/registry/core/pod/storage/eviction.go,
+		// getPodDisruptionBudgets, lines 498-505: only checks err != nil and
+		// !selector.Matches(...), no Empty() guard). Filtering on Empty()
+		// would silently skip a PDB with selector: {} as if it did not
+		// exist, the opposite of what the apiserver does.
+		if err != nil || !selector.Matches(podLabels) {
 			continue
 		}
 		matchedPDB = true
@@ -162,10 +176,17 @@ func (c PDBConsistency) Run(ctx context.Context, target Target) (Result, error) 
 }
 
 // allowedDisruptions calculates how many pods the PDB allows to be
-// unavailable at once. roundUp reflects the behavior of the in-tree PDB
-// controller: minAvailable rounds up (more conservative about the number
-// of pods that must remain available), while maxUnavailable rounds down
-// (more conservative about the number of allowed disruptions).
+// unavailable at once, matching the in-tree PDB controller exactly:
+// k8s.io/kubernetes@v1.36.1 pkg/controller/disruption/disruption.go, the
+// GetPodDisruptionsAllowed path, calls GetScaledValueFromIntOrPercent with
+// roundUp=true for BOTH minAvailable (line ~845) and maxUnavailable (line
+// ~826). roundUp only changes the result for a percentage value (an
+// integer value is unaffected either way): rounding maxUnavailable down,
+// as this function used to do, understated disruptionsAllowed for any
+// percentage that does not divide replicas evenly (for example
+// maxUnavailable: 25% on 3 replicas: floor(0.75)=0 vs. the real
+// ceil(0.75)=1), producing a false "leaves no disruption headroom"
+// finding for a PDB the real controller considers perfectly healthy.
 func allowedDisruptions(minAvailable, maxUnavailable *intstr.IntOrString, replicas int32) (allowed int32, mode string, err error) {
 	switch {
 	case minAvailable != nil:
@@ -176,7 +197,7 @@ func allowedDisruptions(minAvailable, maxUnavailable *intstr.IntOrString, replic
 		allowed = replicas - int32(v)
 		mode = "minAvailable"
 	case maxUnavailable != nil:
-		v, err := intstr.GetScaledValueFromIntOrPercent(maxUnavailable, int(replicas), false)
+		v, err := intstr.GetScaledValueFromIntOrPercent(maxUnavailable, int(replicas), true)
 		if err != nil {
 			return 0, "", err
 		}
