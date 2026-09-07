@@ -34,6 +34,7 @@ import (
 func registeredChecks() []check.Check {
 	return []check.Check{
 		check.PDBConsistency{},
+		check.PDBDaemonsetScale{},
 		check.QuotaHeadroom{},
 		check.HPAQuotaHeadroom{},
 		check.SelectorOverlap{},
