@@ -77,6 +77,30 @@ func TestPaused_StatefulSet_Skipped(t *testing.T) {
 	}
 }
 
+// DaemonSet has no spec.paused field either (a hard fact about the API, see
+// workload.FromDaemonSet's own doc comment): the SkipReason must name
+// DaemonSet specifically, not a leftover "StatefulSet" string.
+func TestPaused_DaemonSet_Skipped(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "logger", Namespace: testNamespace},
+	}
+	target := diagnose.Target{Namespace: testNamespace, Workload: workload.FromDaemonSet(ds)}
+
+	res, err := diagnose.Paused{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if !res.Skipped {
+		t.Fatal("DaemonSet has no pause mechanism: this must be Skipped, not silently empty")
+	}
+	if !strings.Contains(res.SkipReason, "DaemonSet") {
+		t.Errorf("SkipReason must name the kind, got %q", res.SkipReason)
+	}
+	if len(res.Findings) != 0 {
+		t.Fatalf("a Skipped result must carry no Findings, got %+v", res.Findings)
+	}
+}
+
 func TestPaused_NotPaused_NoFinding(t *testing.T) {
 	d := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "checkout", Namespace: testNamespace},
