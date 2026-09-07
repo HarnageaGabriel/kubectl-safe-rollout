@@ -72,7 +72,21 @@ func (c PDBConsistency) Run(ctx context.Context, target Target) (Result, error) 
 	matchedPDB := false
 	for _, pdb := range pdbList.Items {
 		selector, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
-		if err != nil || selector.Empty() || !selector.Matches(podLabels) {
+		// No selector.Empty() guard here: a nil Selector already resolves to
+		// labels.Nothing() (Matches always false, so it is filtered out by
+		// the Matches check below on its own), but an explicit empty ({})
+		// Selector resolves to labels.Everything() and DOES have
+		// Empty()==true — yet the API contract says it matches every pod in
+		// the namespace (k8s.io/api@v0.37.0 policy/v1/types.go, line 38:
+		// "A null selector will match no pods, while an empty ({}) selector
+		// will select all pods within the namespace"), and the real eviction
+		// handler enforces exactly that (k8s.io/kubernetes@v1.36.1
+		// pkg/registry/core/pod/storage/eviction.go,
+		// getPodDisruptionBudgets, lines 498-505: only checks err != nil and
+		// !selector.Matches(...), no Empty() guard). Filtering on Empty()
+		// would silently skip a PDB with selector: {} as if it did not
+		// exist, the opposite of what the apiserver does.
+		if err != nil || !selector.Matches(podLabels) {
 			continue
 		}
 		matchedPDB = true

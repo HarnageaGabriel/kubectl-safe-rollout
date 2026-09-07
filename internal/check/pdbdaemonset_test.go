@@ -127,6 +127,28 @@ func TestPDBDaemonsetScale_NoMatchingPDB_NoFindings(t *testing.T) {
 	}
 }
 
+// Regression: an explicit empty ({}) selector must be treated as matching
+// every pod in the namespace, same reasoning as pdb-consistency (see
+// internal/check/pdb.go and the identical guard comment in
+// internal/check/pdbdaemonset.go). Filtering it out via selector.Empty(),
+// as this check used to do, silently treated a catch-all
+// maxUnavailable-based PDB as if it did not select this DaemonSet at all,
+// hiding a finding for a mechanism this check exists specifically to
+// catch.
+func TestPDBDaemonsetScale_ExplicitEmptySelector_MatchesAllPods_FindingProduced(t *testing.T) {
+	ds := daemonSetForPDBCheck(3)
+	pdb := daemonSetPDB("catch-all", nil, intstrPtr(intstr.FromInt(1)), 1, 1)
+	pdb.Spec.Selector = &metav1.LabelSelector{}
+
+	res := runPDBDaemonsetCheck(t, workload.FromDaemonSet(ds), ds, pdb)
+	if res.Skipped || len(res.Findings) != 1 {
+		t.Fatalf("an explicit empty selector must be treated as matching this DaemonSet's pods: want exactly 1 finding, got %+v", res)
+	}
+	if res.Findings[0].Severity != model.SeverityMedium {
+		t.Errorf("severity = %v, want Medium: the mechanism guarantees the outcome but no condition has been observed yet", res.Findings[0].Severity)
+	}
+}
+
 func TestPDBDaemonsetScale_MinAvailableInteger_NoFindings(t *testing.T) {
 	ds := daemonSetForPDBCheck(3)
 	pdb := daemonSetPDB("safe", intstrPtr(intstr.FromInt(1)), nil, 1, 1)

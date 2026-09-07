@@ -332,6 +332,28 @@ func TestPDBConsistency_MinAvailablePercent100_StillHigh(t *testing.T) {
 	}
 }
 
+// Regression: an explicit empty ({}) selector must be treated as matching
+// every pod in the namespace, per the API contract
+// (k8s.io/api@v0.37.0 policy/v1/types.go, line 38: "a null selector will
+// match no pods, while an empty ({}) selector will select all pods within
+// the namespace") and the real eviction handler
+// (k8s.io/kubernetes@v1.36.1 pkg/registry/core/pod/storage/eviction.go,
+// getPodDisruptionBudgets). Filtering it out via selector.Empty(), as this
+// check used to do, silently treated a catch-all PDB as if it did not
+// exist: a multi-replica workload it actually protects would still get
+// the Low "no PodDisruptionBudget" finding.
+func TestPDBConsistency_ExplicitEmptySelector_MatchesAllPods_NoMissingPDBFinding(t *testing.T) {
+	one := intstr.FromInt(1)
+	res := runPDBCheck(t,
+		deployment(3, rollingUpdateStrategy(nil)),
+		pdb("catch-all-pdb", nil, nil, intstrPtr(one)),
+	)
+
+	if len(res.Findings) != 0 {
+		t.Fatalf("an explicit empty selector must be treated as matching this workload's pods, with sufficient headroom: want 0 findings, got %+v", res.Findings)
+	}
+}
+
 // DaemonSet pods have no /scale subresource: recommending maxUnavailable
 // here would recommend exactly the misconfiguration pdb-daemonset-scale
 // exists to catch. The "no PDB" remediation must say minAvailable as an
