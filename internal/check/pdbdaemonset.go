@@ -151,10 +151,18 @@ func pdbDaemonsetUnverifiableForm(spec policyv1.PodDisruptionBudgetSpec) (mode, 
 // observed on the live object (High) or not yet confirmed by the
 // controller (Medium): the mechanism itself is deterministic once matched,
 // but this project reports what has actually happened, not only what will.
+//
+// Deliberately does NOT gate on status.observedGeneration: verified live on
+// kind that the disruption controller's failSafe path (the one that writes
+// SyncFailed in the first place, see this file's package doc comment) never
+// populates observedGeneration at all — it stays at its zero value forever
+// for a PDB stuck in this state, permanently zero and always less than
+// generation=1. Gating on it here would make this check unable to ever
+// report High for the exact condition it exists to detect. The
+// DisruptionAllowed condition itself is the direct, already-verified fact;
+// observedGeneration would have been a secondary corroboration, not the
+// primary signal, and is not a reliable one for this code path.
 func pdbDaemonsetSeverity(pdb policyv1.PodDisruptionBudget) (model.Severity, []string) {
-	if pdb.Status.ObservedGeneration < pdb.Generation {
-		return model.SeverityMedium, []string{"disruptionAllowedCondition=not yet observed at the current generation"}
-	}
 	for _, cond := range pdb.Status.Conditions {
 		if cond.Type != policyv1.DisruptionAllowedCondition {
 			continue
@@ -164,5 +172,5 @@ func pdbDaemonsetSeverity(pdb policyv1.PodDisruptionBudget) (model.Severity, []s
 		}
 		return model.SeverityMedium, []string{fmt.Sprintf("disruptionAllowedCondition=%s/%s", cond.Status, cond.Reason)}
 	}
-	return model.SeverityMedium, []string{"disruptionAllowedCondition=absent"}
+	return model.SeverityMedium, []string{"disruptionAllowedCondition=absent (controller has not reconciled this PodDisruptionBudget yet)"}
 }
