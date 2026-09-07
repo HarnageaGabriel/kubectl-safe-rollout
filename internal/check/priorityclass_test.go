@@ -168,6 +168,38 @@ func TestPriorityClassExists_StatefulSet_Existing_NoFindings(t *testing.T) {
 	}
 }
 
+// DaemonSet is a plain pod-template passthrough for this check, same as
+// StatefulSet above: a single smoke test is enough to demonstrate it,
+// unlike the checks that needed real DaemonSet-specific logic changes.
+func TestPriorityClassExists_DaemonSet_Missing_HighFinding(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "logger", Namespace: testNamespace},
+		Spec: appsv1.DaemonSetSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers:        []corev1.Container{{Name: "app", Image: "example.com/logger:v1"}},
+					PriorityClassName: "this-priorityclass-does-not-exist",
+				},
+			},
+		},
+	}
+	client := fake.NewSimpleClientset()
+	result, err := check.PriorityClassExists{}.Run(context.Background(), check.Target{
+		Namespace: testNamespace,
+		Workload:  workload.FromDaemonSet(ds),
+		Client:    client,
+	})
+	if err != nil {
+		t.Fatalf("Run() returned an unexpected error: %v", err)
+	}
+	if result.Skipped || len(result.Findings) != 1 {
+		t.Fatalf("want one non-skipped finding for the DaemonSet-backed target, got %+v", result)
+	}
+	if !strings.Contains(result.Findings[0].Cause, "DaemonSet/logger") {
+		t.Errorf("cause must name the DaemonSet workload, got %q", result.Findings[0].Cause)
+	}
+}
+
 func TestPriorityClassExists_ReadFailed_Skipped(t *testing.T) {
 	d := deploymentWithContainers(corev1.Container{Name: "app", Image: "nginx:1.27"})
 	d.Spec.Template.Spec.PriorityClassName = "high-priority"
