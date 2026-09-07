@@ -180,10 +180,17 @@ func TestPDBDaemonsetScale_MaxUnavailable_ConditionMissing_MediumFinding(t *test
 	}
 }
 
-func TestPDBDaemonsetScale_MinAvailablePercentage_StaleGeneration_MediumFinding(t *testing.T) {
+func TestPDBDaemonsetScale_MinAvailablePercentage_StaleGeneration_StillHighFromCondition(t *testing.T) {
 	ds := daemonSetForPDBCheck(3)
-	// Generation ahead of observedGeneration: the controller has not yet
-	// reconciled this spec change, so any live condition is stale.
+	// Generation ahead of observedGeneration must NOT downgrade this to
+	// Medium: verified live on kind that the disruption controller's
+	// failSafe path (the one that writes the SyncFailed condition in the
+	// first place) never populates observedGeneration at all — it stays
+	// permanently behind generation for a PDB stuck in this state. Gating
+	// on it would make this check unable to ever report High for the exact
+	// condition it exists to detect (see pdbDaemonsetSeverity's doc
+	// comment). The condition itself, already present here, is the
+	// verified ground truth.
 	pdb := daemonSetPDB("stale", intstrPtr(intstr.FromString("50%")), nil, 3, 1, syncFailedCondition())
 
 	res := runPDBDaemonsetCheck(t, workload.FromDaemonSet(ds), ds, pdb)
@@ -191,8 +198,29 @@ func TestPDBDaemonsetScale_MinAvailablePercentage_StaleGeneration_MediumFinding(
 		t.Fatalf("want exactly 1 finding, got %+v", res)
 	}
 	f := res.Findings[0]
-	if f.Severity != model.SeverityMedium {
-		t.Errorf("severity = %v, want Medium: stale observedGeneration must not be trusted as confirmation", f.Severity)
+	if f.Severity != model.SeverityHigh {
+		t.Errorf("severity = %v, want High: a live SyncFailed condition is the verified fact, independent of observedGeneration", f.Severity)
+	}
+}
+
+// TestPDBDaemonsetScale_ObservedGenerationNeverSet_StillHighFromCondition
+// reproduces the literal shape observed live on kind (v1.37.0): the
+// disruption controller's failSafe path never writes observedGeneration at
+// all for a PDB stuck in SyncFailed, so it stays at its zero value (never
+// "0 and 1" from a transient lag — permanently 0) while generation is 1
+// from the single PDB create. A regression here means this check can never
+// report High for the exact live-verified condition it exists to catch.
+func TestPDBDaemonsetScale_ObservedGenerationNeverSet_StillHighFromCondition(t *testing.T) {
+	ds := daemonSetForPDBCheck(3)
+	pdb := daemonSetPDB("never-observed", nil, intstrPtr(intstr.FromInt32(1)), 1, 0, syncFailedCondition())
+
+	res := runPDBDaemonsetCheck(t, workload.FromDaemonSet(ds), ds, pdb)
+	if res.Skipped || len(res.Findings) != 1 {
+		t.Fatalf("want exactly 1 finding, got %+v", res)
+	}
+	f := res.Findings[0]
+	if f.Severity != model.SeverityHigh {
+		t.Errorf("severity = %v, want High: observedGeneration=0 is the permanent, real-world value on this failure path, not a transient lag to distrust", f.Severity)
 	}
 }
 
