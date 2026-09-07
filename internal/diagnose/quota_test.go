@@ -37,6 +37,12 @@ func replicaSet(name string) appsv1.ReplicaSet {
 // is no intermediate object, the source is the workload itself.
 var statefulSetSource = diagnose.PodCreationSource{Kind: "StatefulSet", Namespace: testNamespace, Name: "app", UID: "sts-uid"}
 
+// daemonSetSource mirrors statefulSetSource for DaemonSet: the daemon
+// controller creates Pods directly too (dsc.podControl.CreatePods, verified
+// against k8s.io/kubernetes@v1.36.1's daemon_controller.go), so there is no
+// intermediate object here either.
+var daemonSetSource = diagnose.PodCreationSource{Kind: "DaemonSet", Namespace: testNamespace, Name: "logger", UID: "ds-uid"}
+
 // targetWithSources builds a diagnose.Target directly from
 // PodCreationSources, bypassing newTarget's ReplicaSet-shaped fixture path:
 // Quota.Diagnose does not read target.Client, so no fake clientset is
@@ -330,5 +336,80 @@ func TestQuota_StatefulSetSource_Undetermined_RemediationNamesStatefulSet(t *tes
 	}
 	if strings.Contains(cmd, "replicaset") {
 		t.Errorf("remediation command must not name replicaset for a StatefulSet-sourced finding, got %q", cmd)
+	}
+}
+
+// DaemonSet has no ReplicaSet either: these three mirror the StatefulSet
+// source tests above through a DaemonSet PodCreationSource, the same
+// regression class already found once for StatefulSet (the undetermined
+// remediation command hardcoding "kubectl describe replicaset" regardless of
+// the real source kind).
+
+func TestQuota_DaemonSetSource_Exceeded(t *testing.T) {
+	events := []corev1.Event{
+		event("ds-uid", "FailedCreate", `Error creating: pods "logger-" is forbidden: exceeded quota: compute-quota, requested: limits.cpu=1, used: limits.cpu=4, limited: limits.cpu=4`),
+	}
+	target := targetWithSources([]diagnose.PodCreationSource{daemonSetSource}, events)
+
+	res, err := diagnose.Quota{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if len(res.Findings) != 1 || res.Findings[0].CheckID != string(diagnose.CauseQuotaExceeded) {
+		t.Fatalf("expected 1 finding %q, got %+v", diagnose.CauseQuotaExceeded, res.Findings)
+	}
+	if res.Findings[0].Resource.Kind != "DaemonSet" {
+		t.Errorf("Resource.Kind = %q, expected DaemonSet: it owns pod creation directly, there is no ReplicaSet", res.Findings[0].Resource.Kind)
+	}
+}
+
+func TestQuota_DaemonSetSource_MissingServiceAccount(t *testing.T) {
+	events := []corev1.Event{
+		event("ds-uid", "FailedCreate", `Error creating: pods "logger-" is forbidden: error looking up service account demo/does-not-exist-sa: serviceaccount "does-not-exist-sa" not found`),
+	}
+	target := targetWithSources([]diagnose.PodCreationSource{daemonSetSource}, events)
+
+	res, err := diagnose.Quota{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if len(res.Findings) != 1 || res.Findings[0].CheckID != string(diagnose.CauseServiceAccountMissing) {
+		t.Fatalf("expected 1 finding %q, got %+v", diagnose.CauseServiceAccountMissing, res.Findings)
+	}
+	if res.Findings[0].Resource.Kind != "DaemonSet" {
+		t.Errorf("Resource.Kind = %q, expected DaemonSet", res.Findings[0].Resource.Kind)
+	}
+}
+
+// The undetermined remediation command must name the actual source kind:
+// printing "kubectl describe replicaset" (or "statefulset") for a
+// DaemonSet-sourced finding would point the operator at the wrong object
+// type. This is the exact regression already found and fixed once for
+// StatefulSet (see CLAUDE.md): a new PodCreationSource.Kind must not require
+// touching quota.go again, since its remediation command is already built
+// from strings.ToLower(source.Kind) rather than a hardcoded literal.
+func TestQuota_DaemonSetSource_Undetermined_RemediationNamesDaemonSet(t *testing.T) {
+	events := []corev1.Event{
+		event("ds-uid", "FailedCreate", `Error creating: admission webhook "policy.example.com" denied the request: missing required label`),
+	}
+	target := targetWithSources([]diagnose.PodCreationSource{daemonSetSource}, events)
+
+	res, err := diagnose.Quota{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if len(res.Findings) != 1 || res.Findings[0].CheckID != string(diagnose.CauseQuotaUndetermined) {
+		t.Fatalf("expected 1 finding %q, got %+v", diagnose.CauseQuotaUndetermined, res.Findings)
+	}
+	f := res.Findings[0]
+	if len(f.Remediation.Commands) != 1 {
+		t.Fatalf("expected exactly 1 remediation command, got %+v", f.Remediation.Commands)
+	}
+	cmd := f.Remediation.Commands[0]
+	if !strings.Contains(cmd, "daemonset") {
+		t.Errorf("remediation command must name daemonset, got %q", cmd)
+	}
+	if strings.Contains(cmd, "replicaset") || strings.Contains(cmd, "statefulset") {
+		t.Errorf("remediation command must not name replicaset or statefulset for a DaemonSet-sourced finding, got %q", cmd)
 	}
 }
