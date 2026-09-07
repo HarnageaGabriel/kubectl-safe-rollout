@@ -154,6 +154,7 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 	var skipped, evaluated []string
 	for _, c := range []check.Check{
 		check.PDBConsistency{},
+		check.PDBEvictionBlocked{},
 		check.QuotaHeadroom{},
 		check.HPAQuotaHeadroom{},
 		check.SelectorOverlap{},
@@ -223,7 +224,12 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 	// config-references-exist/pvc-exists, this needs no reference in the pod
 	// template to exercise its degrade path, since the very first read it
 	// performs is already cluster-scoped and denied.
-	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.IngressClassExistsCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.PriorityClassExistsCheckID, check.SchedulingConstraintsFeasibilityCheckID, check.SelectorOverlapCheckID, check.AdmissionWebhookVisibilityCheckID} {
+	// pdb-eviction-blocked lists PodDisruptionBudgets before any other
+	// return except the replicas==0 guard (see internal/check/pdbeviction.go):
+	// the Deployment target above has 1 replica, so it always reaches, and
+	// is denied by, that List call, exercising its real degrade path with no
+	// dedicated fixture needed.
+	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.IngressClassExistsCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.PriorityClassExistsCheckID, check.SchedulingConstraintsFeasibilityCheckID, check.SelectorOverlapCheckID, check.AdmissionWebhookVisibilityCheckID, check.PDBEvictionBlockedCheckID} {
 		if !contains(skipped, want) {
 			t.Errorf("check %q needs a resource the Role withholds and must skip, not fail or silently report clean (evaluated=%v, skipped=%v)", want, evaluated, skipped)
 		}
