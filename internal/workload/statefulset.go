@@ -258,3 +258,10 @@ func (w *statefulSetWorkload) PendingRevisionUpdate() (updateRevision, currentRe
 func (w *statefulSetWorkload) VolumeClaimTemplates() []corev1.PersistentVolumeClaim {
 	return w.s.Spec.VolumeClaimTemplates
 }
+
+// DesiredCount implements Workload: same generation-catch-up check already
+// used by RolloutComplete, reused rather than duplicated with a different
+// definition.
+func (w *statefulSetWorkload) DesiredCount() (count int32, observed bool) {
+	return w.Replicas(), w.s.Generation <= w.s.Status.ObservedGeneration
+}

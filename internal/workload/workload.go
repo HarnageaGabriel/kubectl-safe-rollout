@@ -194,6 +194,16 @@ type Workload interface {
 	// case, the same convention already used by UpdateStrategy's Partition
 	// field for a StatefulSet-only concept with no Deployment equivalent.
 	VolumeClaimTemplates() []corev1.PersistentVolumeClaim
+	// DesiredCount is the controller's own count of pods it intends to run:
+	// Replicas() for Deployment/StatefulSet, Status.DesiredNumberScheduled
+	// (the count of eligible nodes, not a user-set field at all) for
+	// DaemonSet. observed is false when the controller has not yet
+	// processed the current spec generation (metadata.generation is ahead
+	// of the status's observedGeneration): callers that need a
+	// controller-confirmed count, not merely the last one written to spec,
+	// should treat observed=false as "this number is stale, do not act on
+	// it yet" rather than as an error.
+	DesiredCount() (count int32, observed bool)
 }
 
 type deploymentWorkload struct {
@@ -388,4 +398,12 @@ func (w *deploymentWorkload) PendingRevisionUpdate() (updateRevision, currentRev
 // not a placeholder standing in for "unknown".
 func (w *deploymentWorkload) VolumeClaimTemplates() []corev1.PersistentVolumeClaim {
 	return nil
+}
+
+// DesiredCount implements Workload: Replicas() is the desired count, and
+// observed mirrors the same generation check RolloutComplete already
+// performs (Status.ObservedGeneration catching up with Generation), reused
+// here instead of invented separately.
+func (w *deploymentWorkload) DesiredCount() (count int32, observed bool) {
+	return w.Replicas(), w.d.Generation <= w.d.Status.ObservedGeneration
 }

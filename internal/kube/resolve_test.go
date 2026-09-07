@@ -73,6 +73,13 @@ func statefulSetFixture(name string) *appsv1.StatefulSet {
 	}
 }
 
+func daemonSetFixture(name string) *appsv1.DaemonSet {
+	return &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Status:     appsv1.DaemonSetStatus{DesiredNumberScheduled: 3},
+	}
+}
+
 func TestResolveWorkload_Deployment(t *testing.T) {
 	d := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "checkout", Namespace: "default"},
@@ -95,9 +102,6 @@ func TestResolveWorkload_Deployment(t *testing.T) {
 // missing object instead of an unsupported feature.
 func TestResolveWorkload_UnsupportedKind(t *testing.T) {
 	unsupported := []string{
-		"daemonset/checkout",
-		"daemonsets/checkout",
-		"ds/checkout",
 		"pod/checkout",
 		"job/checkout",
 		"cronjob/checkout",
@@ -117,8 +121,9 @@ func TestResolveWorkload_UnsupportedKind(t *testing.T) {
 			if !strings.Contains(err.Error(), kind) {
 				t.Errorf("error must name the rejected kind %q, got: %v", kind, err)
 			}
-			if !strings.Contains(strings.ToLower(err.Error()), "deployment") || !strings.Contains(strings.ToLower(err.Error()), "statefulset") {
-				t.Errorf("error must name what is supported (Deployment and StatefulSet), got: %v", err)
+			lower := strings.ToLower(err.Error())
+			if !strings.Contains(lower, "deployment") || !strings.Contains(lower, "statefulset") || !strings.Contains(lower, "daemonset") {
+				t.Errorf("error must name what is supported (Deployment, StatefulSet and DaemonSet), got: %v", err)
 			}
 		})
 	}
@@ -181,6 +186,43 @@ func TestResolveWorkload_AcceptedStatefulSetAliases(t *testing.T) {
 			}
 			if w.Name() != "checkout" {
 				t.Errorf("resolved workload name = %q, expected checkout", w.Name())
+			}
+		})
+	}
+}
+
+func TestResolveWorkload_DaemonSet(t *testing.T) {
+	client := fake.NewSimpleClientset(daemonSetFixture("logger"))
+
+	w, err := ResolveWorkload(context.Background(), client, "default", "daemonset/logger")
+	if err != nil {
+		t.Fatalf("ResolveWorkload: %v", err)
+	}
+	if w.Kind() != "DaemonSet" || w.Name() != "logger" || w.Replicas() != 3 {
+		t.Errorf("resolved workload = {Kind: %q, Name: %q, Replicas: %d}, expected {DaemonSet, logger, 3}", w.Kind(), w.Name(), w.Replicas())
+	}
+}
+
+// Case and the short/plural forms kubectl itself accepts must all resolve, so
+// that a habit formed with kubectl does not fail here for no reason.
+func TestResolveWorkload_AcceptedDaemonSetAliases(t *testing.T) {
+	for _, ref := range []string{
+		"daemonset/logger",
+		"daemonsets/logger",
+		"ds/logger",
+		"DaemonSet/logger",
+		"DS/logger",
+		"daemonset.apps/logger",
+	} {
+		t.Run(ref, func(t *testing.T) {
+			client := fake.NewSimpleClientset(daemonSetFixture("logger"))
+
+			w, err := ResolveWorkload(context.Background(), client, "default", ref)
+			if err != nil {
+				t.Fatalf("reference %q must resolve, got: %v", ref, err)
+			}
+			if w.Name() != "logger" {
+				t.Errorf("resolved workload name = %q, expected logger", w.Name())
 			}
 		})
 	}
