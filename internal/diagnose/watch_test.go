@@ -713,6 +713,69 @@ func TestWatch_ProgressDeadlineObservedOnDeployment(t *testing.T) {
 	}
 }
 
+func watchDaemonSet() *appsv1.DaemonSet {
+	return &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "logger", Namespace: testNamespace, UID: "ds-uid", Generation: 1, ResourceVersion: "1"},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "logger"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "logger"}},
+			},
+		},
+		Status: appsv1.DaemonSetStatus{ObservedGeneration: 1},
+	}
+}
+
+// TestWatch_DaemonSet_PodCreationSourceIsItself_NoReplicaSetCalls is the
+// end-to-end proof (through the real Watch() loop, not just
+// daemonSetObserver in isolation) that a DaemonSet target's
+// PodCreationSources resolves to the DaemonSet itself with zero ReplicaSet
+// API calls: the FailedCreate event is attached directly to the DaemonSet's
+// own UID, so the very first evaluateTick already finds the quota finding
+// and Watch returns before ever starting the pod/controller watch streams.
+func TestWatch_DaemonSet_PodCreationSourceIsItself_NoReplicaSetCalls(t *testing.T) {
+	ds := watchDaemonSet()
+	client := fake.NewSimpleClientset(ds)
+	_, err := client.CoreV1().Events(testNamespace).Create(context.Background(), &corev1.Event{
+		ObjectMeta:     metav1.ObjectMeta{Name: "logger.failedcreate", Namespace: testNamespace},
+		InvolvedObject: corev1.ObjectReference{UID: ds.UID, Namespace: testNamespace},
+		Reason:         "FailedCreate",
+		Message:        `Error creating: pods "logger-" is forbidden: exceeded quota: tight, requested: pods=1, used: pods=1, limited: pods=1`,
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("creating FailedCreate event: %v", err)
+	}
+
+	wt := diagnose.WatchTarget{
+		Namespace: testNamespace,
+		Workload:  workload.FromDaemonSet(ds),
+		Client:    client,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	outcome, err := diagnose.Watch(ctx, wt)
+	if err != nil {
+		t.Fatalf("Watch returned an unexpected error: %v", err)
+	}
+	if outcome.Succeeded {
+		t.Fatal("Watch reported success; expected the quota finding to stop observation")
+	}
+	findings := diagnose.AllFindings(outcome.Results)
+	if len(findings) != 1 || findings[0].CheckID != string(diagnose.CauseQuotaExceeded) {
+		t.Fatalf("expected 1 finding %q, got %+v", diagnose.CauseQuotaExceeded, findings)
+	}
+	if findings[0].Resource.Kind != "DaemonSet" {
+		t.Errorf("Resource.Kind = %q, expected DaemonSet: it owns pod creation directly, there is no ReplicaSet", findings[0].Resource.Kind)
+	}
+	for _, action := range client.Actions() {
+		if action.GetResource().Resource == "replicasets" {
+			t.Fatalf("unexpected API call against ReplicaSets for a DaemonSet target: %+v", action)
+		}
+	}
+}
+
 func TestWatch_EventsInaccessible_DegradesWithoutLosingStructuredSignals(t *testing.T) {
 	p := watchHealthyPod()
 	p.Status.ContainerStatuses = []corev1.ContainerStatus{{

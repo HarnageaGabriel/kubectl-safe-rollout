@@ -19,10 +19,13 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/diagnose"
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/model"
+	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/workload"
 )
 
 func crashLoopWaiting() corev1.ContainerStateWaiting {
@@ -39,6 +42,41 @@ func TestCrashLoop_OOMKilled(t *testing.T) {
 		}},
 	})}
 	target := newTarget(t, pods, nil, nil)
+
+	res, err := diagnose.CrashLoop{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d: %+v", len(res.Findings), res.Findings)
+	}
+	f := res.Findings[0]
+	if f.CheckID != string(diagnose.CauseCrashLoopOOMKilled) {
+		t.Errorf("CheckID = %q, expected %q", f.CheckID, diagnose.CauseCrashLoopOOMKilled)
+	}
+	if f.Undetermined {
+		t.Error("a confirmed OOMKill must not be Undetermined")
+	}
+}
+
+// TestCrashLoop_DaemonSet_OOMKilled proves CrashLoop actually classifies a
+// pod belonging to a DaemonSet target, not merely by structural assumption:
+// this Diagnoser reads only target.Pods (kind-agnostic), but target.Workload
+// is set here to a real DaemonSet to exercise that path directly rather than
+// leaving it unverified.
+func TestCrashLoop_DaemonSet_OOMKilled(t *testing.T) {
+	pods := []corev1.Pod{podWith("logger-node1", "logger-node1-uid", corev1.PodRunning, corev1.ContainerStatus{
+		Name:         "app",
+		RestartCount: 4,
+		State:        corev1.ContainerState{Waiting: ptrWaiting(crashLoopWaiting())},
+		LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+			Reason: "OOMKilled", ExitCode: 137,
+		}},
+	})}
+	target := newTarget(t, pods, nil, nil)
+	target.Workload = workload.FromDaemonSet(&appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "logger", Namespace: testNamespace},
+	})
 
 	res, err := diagnose.CrashLoop{}.Diagnose(t.Context(), target)
 	if err != nil {

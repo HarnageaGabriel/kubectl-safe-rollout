@@ -48,6 +48,34 @@ func TestProgressDeadline_StatefulSet_Skipped(t *testing.T) {
 	}
 }
 
+// DaemonSet has no progressDeadlineSeconds field and no controller-set
+// Progressing condition either (DaemonSetConditionType declares zero
+// constants, verified against k8s.io/api@v0.37.0): this must Skip the same
+// way as StatefulSet, and the SkipReason must name DaemonSet specifically,
+// not a leftover "StatefulSet" string.
+func TestProgressDeadline_DaemonSet_Skipped(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "logger", Namespace: testNamespace, Generation: 1},
+		Status:     appsv1.DaemonSetStatus{ObservedGeneration: 1},
+	}
+	target := newTarget(t, nil, nil, nil)
+	target.Workload = workload.FromDaemonSet(ds)
+
+	res, err := diagnose.ProgressDeadline{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if !res.Skipped {
+		t.Fatal("DaemonSet has no progressDeadlineSeconds mechanism: this must be Skipped, not silently empty")
+	}
+	if !strings.Contains(res.SkipReason, "DaemonSet") {
+		t.Errorf("SkipReason must name the missing mechanism's kind, got %q", res.SkipReason)
+	}
+	if len(res.Findings) != 0 {
+		t.Fatalf("a Skipped result must carry no Findings, got %+v", res.Findings)
+	}
+}
+
 func deploymentWithConditions(conditions ...appsv1.DeploymentCondition) *appsv1.Deployment {
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: testNamespace, Generation: 1},

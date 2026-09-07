@@ -150,6 +150,29 @@ func TestReadiness_StatefulSet_Skipped(t *testing.T) {
 	}
 }
 
+// Readiness depends entirely on ProgressDeadlineExceeded, which never fires
+// for DaemonSet either (same gate as StatefulSet): must Skip, not silently
+// report no Finding.
+func TestReadiness_DaemonSet_Skipped(t *testing.T) {
+	pod := podWith("app-1", "app-1-uid", corev1.PodRunning, runningContainer(false))
+	target := newTarget(t, []corev1.Pod{pod}, nil, nil)
+	target.Workload = workload.FromDaemonSet(&appsv1.DaemonSet{})
+
+	res, err := diagnose.Readiness{}.Diagnose(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Diagnose returned an unexpected error: %v", err)
+	}
+	if !res.Skipped {
+		t.Fatal("readiness classification depends on progress-deadline evaluation: this must be Skipped for DaemonSet")
+	}
+	if !strings.Contains(res.SkipReason, "progress-deadline") {
+		t.Errorf("SkipReason must name the missing mechanism, got %q", res.SkipReason)
+	}
+	if len(res.Findings) != 0 {
+		t.Fatalf("a Skipped result must carry no Findings, got %+v", res.Findings)
+	}
+}
+
 func TestReadiness_WaitingAfterDeadline_NoFinding(t *testing.T) {
 	status := corev1.ContainerStatus{
 		Name:  "app",
