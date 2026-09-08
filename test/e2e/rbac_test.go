@@ -157,6 +157,7 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 		check.PDBEvictionBlocked{},
 		check.QuotaHeadroom{},
 		check.HPAQuotaHeadroom{},
+		check.LimitRangeFeasibility{},
 		check.SelectorOverlap{},
 		check.ServiceAccountExists{},
 		check.PriorityClassExists{},
@@ -229,7 +230,11 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 	// the Deployment target above has 1 replica, so it always reaches, and
 	// is denied by, that List call, exercising its real degrade path with no
 	// dedicated fixture needed.
-	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.IngressClassExistsCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.PriorityClassExistsCheckID, check.SchedulingConstraintsFeasibilityCheckID, check.SelectorOverlapCheckID, check.AdmissionWebhookVisibilityCheckID, check.PDBEvictionBlockedCheckID} {
+	// limitrange-feasibility lists LimitRanges (also not granted) as its
+	// very first operation, unconditionally, before it ever inspects the
+	// pod template: no dedicated fixture is needed either, the same as
+	// pdb-eviction-blocked above.
+	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.IngressClassExistsCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.PriorityClassExistsCheckID, check.SchedulingConstraintsFeasibilityCheckID, check.SelectorOverlapCheckID, check.AdmissionWebhookVisibilityCheckID, check.PDBEvictionBlockedCheckID, check.LimitRangeFeasibilityCheckID} {
 		if !contains(skipped, want) {
 			t.Errorf("check %q needs a resource the Role withholds and must skip, not fail or silently report clean (evaluated=%v, skipped=%v)", want, evaluated, skipped)
 		}
