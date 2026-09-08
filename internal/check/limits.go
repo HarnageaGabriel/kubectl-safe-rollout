@@ -33,6 +33,13 @@ const ResourceLimitsCheckID = "resource-limits"
 // same way, and this check would otherwise miss it entirely (found on kind:
 // a Deployment with a fully-limited main container and a limit-less init
 // container reported clean).
+//
+// This check is static best practice only, at Low severity, with no
+// cluster read: a missing limit here is not necessarily a live problem.
+// limitrange-feasibility (limitrange.go) is the cluster-aware complement —
+// the very same missing limit can be a guaranteed, High-severity
+// pod-creation rejection if the namespace has a LimitRange that requires
+// one.
 type ResourceLimits struct{}
 
 // ID implements check.Check.
