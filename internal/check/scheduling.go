@@ -79,6 +79,23 @@ const defaultSchedulerName = "default-scheduler"
 //     the NoSchedule/NoExecute taint effects that actually block new pod
 //     placement — PreferNoSchedule is a soft repel, documented as such on
 //     corev1.TaintEffect, and is not modeled here).
+//   - nodeSelector and required node affinity
+//     (affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution):
+//     evaluated with k8s.io/component-helpers's
+//     nodeaffinity.RequiredNodeAffinity.Match, the exact predicate
+//     kube-scheduler's own NodeAffinity plugin applies. It looks ONLY at
+//     node LABELS. When no live node matches, no pod of this workload can
+//     be scheduled at all (High, zeroCandidateNodesFinding). When the only
+//     matching nodes are cordoned (spec.unschedulable) this is reported at
+//     Medium, not High, the same cordon demotion applied above: a cordon
+//     is a transient operator action, not a topology mismatch. A node that
+//     matches the selector but carries a NoSchedule/NoExecute taint the
+//     pod does not tolerate is NOT excluded from this count: taint
+//     modeling in this check is confined to the anti-affinity capacity
+//     path (antiAffinityDomainCount / nodeToleratesBlockingTaints). The
+//     reactive `pending-scheduling-constraints` diagnoser
+//     (internal/diagnose/pending.go) is what covers the untolerated-taint
+//     case, after the scheduler has emitted its FailedScheduling event.
 //
 // What this check deliberately does NOT evaluate — each omission is a
 // scoping decision, not an oversight:
@@ -168,7 +185,10 @@ func (c SchedulingConstraintsFeasibility) Run(ctx context.Context, target Target
 	affinity := target.Workload.Affinity()
 	spreadConstraints := target.Workload.TopologySpreadConstraints()
 	antiAffinityTerms := requiredSelfAntiAffinityTerms(affinity, target.Workload.PodLabels())
-	if len(spreadConstraints) == 0 && len(antiAffinityTerms) == 0 {
+	nodeSelector := target.Workload.NodeSelector()
+	hasNodeConstraints := len(nodeSelector) > 0 ||
+		(affinity != nil && affinity.NodeAffinity != nil && affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil)
+	if len(spreadConstraints) == 0 && len(antiAffinityTerms) == 0 && !hasNodeConstraints {
 		return Result{CheckID: c.ID()}, nil
 	}
 
@@ -194,15 +214,22 @@ func (c SchedulingConstraintsFeasibility) Run(ctx context.Context, target Target
 		return Skip(c.ID(), "the cluster reports zero nodes; scheduling feasibility cannot be evaluated"), nil
 	}
 
-	nodeSelector := target.Workload.NodeSelector()
-	hasNodeConstraints := len(nodeSelector) > 0 ||
-		(affinity != nil && affinity.NodeAffinity != nil && affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil)
 	requiredAffinity := nodeaffinity.NewRequiredNodeAffinity(nodeSelector, affinity)
 
 	var allCandidates, candidates []corev1.Node
+	var matchErr error
 	for _, n := range nodeList.Items {
 		ok, err := requiredAffinity.Match(&n)
-		if err != nil || !ok {
+		if err != nil {
+			// RequiredNodeAffinity.Match only surfaces a parse error for a
+			// node it could not otherwise match (see the vendored
+			// LazyErrorNodeSelector contract): record it, keep going, and
+			// let the zero-candidate branch below decide whether it
+			// matters.
+			matchErr = err
+			continue
+		}
+		if !ok {
 			continue
 		}
 		allCandidates = append(allCandidates, n)
@@ -216,7 +243,27 @@ func (c SchedulingConstraintsFeasibility) Run(ctx context.Context, target Target
 	resource := model.ResourceRef{Kind: target.Workload.Kind(), Namespace: target.Namespace, Name: target.Workload.Name()}
 
 	if len(allCandidates) == 0 {
+		if matchErr != nil {
+			// No node matched and at least one node's required nodeAffinity
+			// did not parse: "matches zero nodes" would misattribute an
+			// unevaluable selector to the cluster's topology. Refuse to
+			// conclude. A successful match on some other node would have
+			// left allCandidates non-empty and we would not be here.
+			return Skip(c.ID(), fmt.Sprintf("the workload's required node affinity could not be evaluated: %v", matchErr)), nil
+		}
 		return Result{CheckID: c.ID(), Findings: []model.Finding{zeroCandidateNodesFinding(workloadRef, resource)}}, nil
+	}
+
+	if len(spreadConstraints) == 0 && len(antiAffinityTerms) == 0 && len(candidates) == 0 {
+		// nodeSelector / required-nodeAffinity-only path: at least one node
+		// matches the workload's node constraints but every one of them is
+		// cordoned (spec.unschedulable). Medium, not High: a cordon is a
+		// transient operator action (a maintenance drain) and a CI gate
+		// must not fail for its duration, the same High->Medium demotion
+		// this file already applies to the spread/anti-affinity cordon
+		// cases. When candidates is non-empty this path is feasible and the
+		// (empty) loops below simply produce no findings.
+		return Result{CheckID: c.ID(), Findings: []model.Finding{allMatchingNodesCordonedFinding(workloadRef, resource, len(allCandidates))}}, nil
 	}
 
 	surge, surgeOK := surgeCount(target.Workload)
@@ -490,6 +537,35 @@ func zeroCandidateNodesFinding(workloadRef string, resource model.ResourceRef) m
 		Remediation: model.Remediation{
 			Summary:          fmt.Sprintf("check %s's nodeSelector/affinity against the labels actually present on cluster nodes, or add nodes carrying the required labels; the correct fix depends on where this workload is meant to run", workloadRef),
 			Commands:         []string{"kubectl get nodes --show-labels"},
+			ContextDependent: true,
+		},
+		Resource: resource,
+	}
+}
+
+// allMatchingNodesCordonedFinding is emitted on the nodeSelector /
+// required-nodeAffinity-only path when every node whose labels match the
+// workload's node constraints is cordoned (spec.unschedulable). Severity
+// is Medium: unlike zeroCandidateNodesFinding this is not a permanent
+// topology mismatch, only a transient operator state, and uncordoning any
+// one matching node restores feasibility. The count that would apply "if
+// uncordoned" is carried in Evidence in the same shape the spread and
+// anti-affinity cordon findings use.
+func allMatchingNodesCordonedFinding(workloadRef string, resource model.ResourceRef, matchingNodes int) model.Finding {
+	return model.Finding{
+		CheckID:  SchedulingConstraintsFeasibilityCheckID,
+		Severity: model.SeverityMedium,
+		Cause: fmt.Sprintf(
+			"%s's nodeSelector/nodeAffinity matches %d node(s) in the cluster, but all of them are cordoned (spec.unschedulable): no pod of this workload can be scheduled until at least one is uncordoned",
+			workloadRef, matchingNodes,
+		),
+		Evidence: []string{
+			"matchingSchedulableNodes=0",
+			fmt.Sprintf("cordonedNodes=%d matchingNodesIfUncordoned=%d", matchingNodes, matchingNodes),
+		},
+		Remediation: model.Remediation{
+			Summary:          fmt.Sprintf("uncordon at least one node whose labels match %s's nodeSelector/affinity once the maintenance drain that cordoned them is done, or, if the cordon is permanent, adjust the workload's node constraints or add nodes carrying the required labels", workloadRef),
+			Commands:         []string{"kubectl get nodes --show-labels", "kubectl uncordon <node>"},
 			ContextDependent: true,
 		},
 		Resource: resource,

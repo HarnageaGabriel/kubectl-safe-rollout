@@ -110,11 +110,13 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 		// degrade path.
 		PriorityClassName: "restricted-priority",
 		// Gives scheduling-constraints-feasibility something to actually
-		// evaluate: without a real topologySpreadConstraint/anti-affinity
-		// term it short-circuits before ever calling Nodes().List(), and
-		// this scenario would prove nothing about its degrade path (the
+		// evaluate: without a real topologySpreadConstraint, required pod
+		// self-anti-affinity term, or nodeSelector / required node affinity
+		// it short-circuits before ever calling Nodes().List(), and this
+		// scenario would prove nothing about its degrade path (the
 		// restricted Role above grants nothing on the cluster-scoped nodes
-		// resource at all).
+		// resource at all). A topologySpreadConstraint is used here; any of
+		// the other inputs would reach the API just the same.
 		TopologySpreadConstraints: []corev1.TopologySpreadConstraint{{
 			MaxSkew:           1,
 			TopologyKey:       "topology.kubernetes.io/zone",
