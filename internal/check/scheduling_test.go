@@ -98,6 +98,14 @@ func testNode(name string, labels map[string]string, mutate ...func(*corev1.Node
 
 func cordoned(n *corev1.Node) { n.Spec.Unschedulable = true }
 
+// tainted returns a node mutator that appends one taint. Used by the
+// nodeSelector-only untolerated-taint tests.
+func tainted(key, value string, effect corev1.TaintEffect) func(*corev1.Node) {
+	return func(n *corev1.Node) {
+		n.Spec.Taints = append(n.Spec.Taints, corev1.Taint{Key: key, Value: value, Effect: effect})
+	}
+}
+
 func zoneLabels(zone string) map[string]string { return map[string]string{zoneKey: zone} }
 
 func hostnameLabels(name string) map[string]string { return map[string]string{hostnameKey: name} }
@@ -857,6 +865,177 @@ func TestSchedulingConstraintsFeasibility_MalformedRequiredNodeAffinity_Skipped(
 	}
 	if len(res.Findings) != 0 {
 		t.Errorf("want no findings when skipping, got %+v", res.Findings)
+	}
+}
+
+// --- nodeSelector-only: untolerated blocking taint on every candidate ---
+
+// The nodeSelector matches exactly one schedulable node, and that node
+// carries a NoSchedule taint the pod does not tolerate: no pod can ever
+// land, the same permanent outcome as zero label match but for a taint
+// reason. High.
+func TestSchedulingConstraintsFeasibility_NodeSelectorOnly_AllMatchingNodesUntolerated_HighFinding(t *testing.T) {
+	d := schedulingDeployment(2, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.NodeSelector = map[string]string{"tier": "web"}
+	})
+	nodes := nodeObjects(
+		testNode("node-a", map[string]string{"tier": "web"}, tainted("dedicated", "gpu", corev1.TaintEffectNoSchedule)),
+		testNode("node-b", map[string]string{"tier": "other"}),
+	)
+	res := runSchedulingCheck(t, workload.FromDeployment(d), nodes...)
+	if res.Skipped || len(res.Findings) != 1 {
+		t.Fatalf("want exactly 1 finding, got %+v", res)
+	}
+	f := res.Findings[0]
+	if f.Severity != model.SeverityHigh {
+		t.Errorf("severity = %v, want High: an untolerated taint on every candidate node is a stable, permanent block", f.Severity)
+	}
+	if f.CheckID != check.SchedulingConstraintsFeasibilityCheckID {
+		t.Errorf("checkID = %q, want %q", f.CheckID, check.SchedulingConstraintsFeasibilityCheckID)
+	}
+	if !evidenceContains(f.Evidence, "matchingSchedulableNodes=1") || !evidenceContains(f.Evidence, "nodesToleratedByWorkload=0") {
+		t.Errorf("evidence must carry the schedulable-match count and the tolerated=0 count, got %+v", f.Evidence)
+	}
+	if !f.Remediation.ContextDependent {
+		t.Errorf("remediation must declare itself context-dependent")
+	}
+}
+
+// Two matching nodes, one tainted (untolerated), one clean: the pod
+// schedules onto the clean one, so nothing is flagged.
+func TestSchedulingConstraintsFeasibility_NodeSelectorOnly_SomeMatchingNodesTolerated_NoFinding(t *testing.T) {
+	d := schedulingDeployment(2, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.NodeSelector = map[string]string{"tier": "web"}
+	})
+	nodes := nodeObjects(
+		testNode("node-a", map[string]string{"tier": "web"}, tainted("dedicated", "gpu", corev1.TaintEffectNoSchedule)),
+		testNode("node-b", map[string]string{"tier": "web"}),
+	)
+	res := runSchedulingCheck(t, workload.FromDeployment(d), nodes...)
+	if res.Skipped || len(res.Findings) != 0 {
+		t.Fatalf("one untainted matching node is enough for the pod to schedule: want 0 findings, got %+v", res)
+	}
+}
+
+// The only matching node is tainted, but the pod carries the matching
+// toleration: feasible, no finding.
+func TestSchedulingConstraintsFeasibility_NodeSelectorOnly_MatchingNodeTaintTolerated_NoFinding(t *testing.T) {
+	d := schedulingDeployment(2, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.NodeSelector = map[string]string{"tier": "web"}
+		spec.Tolerations = []corev1.Toleration{{
+			Key:      "dedicated",
+			Operator: corev1.TolerationOpEqual,
+			Value:    "gpu",
+			Effect:   corev1.TaintEffectNoSchedule,
+		}}
+	})
+	nodes := nodeObjects(
+		testNode("node-a", map[string]string{"tier": "web"}, tainted("dedicated", "gpu", corev1.TaintEffectNoSchedule)),
+	)
+	res := runSchedulingCheck(t, workload.FromDeployment(d), nodes...)
+	if res.Skipped || len(res.Findings) != 0 {
+		t.Fatalf("the pod tolerates the only matching node's taint: want 0 findings, got %+v", res)
+	}
+}
+
+// A PreferNoSchedule taint is a soft repel and never blocks scheduling:
+// nodeToleratesBlockingTaints filters to NoSchedule/NoExecute, so an
+// untolerated PreferNoSchedule taint on the only matching node produces
+// nothing.
+func TestSchedulingConstraintsFeasibility_NodeSelectorOnly_TaintIsPreferNoSchedule_NoFinding(t *testing.T) {
+	d := schedulingDeployment(2, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.NodeSelector = map[string]string{"tier": "web"}
+	})
+	nodes := nodeObjects(
+		testNode("node-a", map[string]string{"tier": "web"}, tainted("dedicated", "gpu", corev1.TaintEffectPreferNoSchedule)),
+	)
+	res := runSchedulingCheck(t, workload.FromDeployment(d), nodes...)
+	if res.Skipped || len(res.Findings) != 0 {
+		t.Fatalf("PreferNoSchedule is a soft repel and never blocks scheduling: want 0 findings, got %+v", res)
+	}
+}
+
+// Non-regression guard: with a spread constraint present the new
+// nodeSelector-only taint branch must not fire, and the existing spread
+// finding must be unchanged even when every candidate node is tainted
+// (the spread branch is deliberately taint-blind).
+func TestSchedulingConstraintsFeasibility_SpreadConstraintWithTaintedNodes_TaintBranchDoesNotFire(t *testing.T) {
+	d := schedulingDeployment(3, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.TopologySpreadConstraints = []corev1.TopologySpreadConstraint{
+			spreadConstraint(zoneKey, 1, corev1.DoNotSchedule, int32Ptr(3)),
+		}
+	})
+	nodes := nodeObjects(
+		testNode("node-a", zoneLabels("zone-a"), tainted("dedicated", "gpu", corev1.TaintEffectNoSchedule)),
+		testNode("node-b", zoneLabels("zone-b"), tainted("dedicated", "gpu", corev1.TaintEffectNoSchedule)),
+	)
+	res := runSchedulingCheck(t, workload.FromDeployment(d), nodes...)
+	if res.Skipped || len(res.Findings) != 1 {
+		t.Fatalf("want exactly 1 finding (the unchanged spread finding), got %+v", res)
+	}
+	f := res.Findings[0]
+	if f.Severity != model.SeverityHigh {
+		t.Errorf("severity = %v, want High: minDomains=3 shortfall, unchanged by the taints", f.Severity)
+	}
+	if !evidenceContains(f.Evidence, "capacity=2") {
+		t.Errorf("spread finding evidence must be unchanged (capacity=2), got %+v", f.Evidence)
+	}
+	if evidenceContains(f.Evidence, "nodesToleratedByWorkload") {
+		t.Errorf("the nodeSelector-only taint finding must not fire when a spread constraint is present, got %+v", f.Evidence)
+	}
+}
+
+// Precedence: a nodeSelector that matches zero nodes wins with
+// zeroCandidateNodesFinding ("matches zero nodes"), even when the nodes
+// that do exist are tainted — there is no candidate whose taints to
+// evaluate.
+func TestSchedulingConstraintsFeasibility_NodeSelectorOnly_ZeroMatchBeatsTaintBranch(t *testing.T) {
+	d := schedulingDeployment(2, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.NodeSelector = map[string]string{"tier": "gpu"}
+	})
+	nodes := nodeObjects(
+		testNode("node-a", map[string]string{"tier": "web"}, tainted("dedicated", "gpu", corev1.TaintEffectNoSchedule)),
+	)
+	res := runSchedulingCheck(t, workload.FromDeployment(d), nodes...)
+	if res.Skipped || len(res.Findings) != 1 {
+		t.Fatalf("want exactly 1 finding, got %+v", res)
+	}
+	f := res.Findings[0]
+	if f.Severity != model.SeverityHigh {
+		t.Errorf("severity = %v, want High", f.Severity)
+	}
+	if !evidenceContains(f.Evidence, "matchingNodes=0") {
+		t.Errorf("evidence must be the zero-match one, got %+v", f.Evidence)
+	}
+	if evidenceContains(f.Evidence, "nodesToleratedByWorkload") {
+		t.Errorf("the taint branch must not run when no node matches the labels, got %+v", f.Evidence)
+	}
+}
+
+// Precedence: one matching node that is both cordoned and tainted yields
+// the Medium cordon finding, not the High taint one — the cordon branch
+// runs first and the taint branch requires candidates (non-cordoned) to
+// be non-empty.
+func TestSchedulingConstraintsFeasibility_NodeSelectorOnly_CordonBeatsTaintBranch(t *testing.T) {
+	d := schedulingDeployment(2, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.NodeSelector = map[string]string{"tier": "web"}
+	})
+	nodes := nodeObjects(
+		testNode("node-a", map[string]string{"tier": "web"}, cordoned, tainted("dedicated", "gpu", corev1.TaintEffectNoSchedule)),
+	)
+	res := runSchedulingCheck(t, workload.FromDeployment(d), nodes...)
+	if res.Skipped || len(res.Findings) != 1 {
+		t.Fatalf("want exactly 1 finding, got %+v", res)
+	}
+	f := res.Findings[0]
+	if f.Severity != model.SeverityMedium {
+		t.Errorf("severity = %v, want Medium: the cordon finding wins", f.Severity)
+	}
+	if !evidenceContains(f.Evidence, "cordonedNodes=1") {
+		t.Errorf("evidence must be the cordon one, got %+v", f.Evidence)
+	}
+	if evidenceContains(f.Evidence, "nodesToleratedByWorkload") {
+		t.Errorf("the taint branch must not run while all candidates are cordoned, got %+v", f.Evidence)
 	}
 }
 

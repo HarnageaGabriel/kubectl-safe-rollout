@@ -88,14 +88,26 @@ const defaultSchedulerName = "default-scheduler"
 //     be scheduled at all (High, zeroCandidateNodesFinding). When the only
 //     matching nodes are cordoned (spec.unschedulable) this is reported at
 //     Medium, not High, the same cordon demotion applied above: a cordon
-//     is a transient operator action, not a topology mismatch. A node that
-//     matches the selector but carries a NoSchedule/NoExecute taint the
-//     pod does not tolerate is NOT excluded from this count: taint
-//     modeling in this check is confined to the anti-affinity capacity
-//     path (antiAffinityDomainCount / nodeToleratesBlockingTaints). The
-//     reactive `pending-scheduling-constraints` diagnoser
-//     (internal/diagnose/pending.go) is what covers the untolerated-taint
-//     case, after the scheduler has emitted its FailedScheduling event.
+//     is a transient operator action, not a topology mismatch. The
+//     allCandidates/candidates node counts themselves stay taint-blind by
+//     design — they exclude only non-matching labels and cordoned nodes,
+//     never taints, kept consistent with the spread branch's documented
+//     nodeTaintsPolicy=Ignore default. On the nodeSelector /
+//     required-nodeAffinity-only path (no spread constraint, no self-
+//     anti-affinity) one further fact IS evaluated: if at least one
+//     schedulable node matches the labels but EVERY such node carries a
+//     NoSchedule/NoExecute taint this workload does not tolerate, the pod
+//     can never be scheduled for a reason distinct from a label mismatch
+//     or a cordon, reported at High
+//     (allMatchingNodesUntoleratedTaintFinding) using a separate
+//     taint-filtered count that never touches allCandidates/candidates.
+//     Still out of scope: the PARTIAL case where only some candidate nodes
+//     are untolerated — the pod simply schedules onto a tolerated one, so
+//     there is nothing to flag. The reactive
+//     `pending-scheduling-constraints` diagnoser
+//     (internal/diagnose/pending.go) still covers the untolerated-taint
+//     case at runtime, after the scheduler has emitted its FailedScheduling
+//     event.
 //
 // What this check deliberately does NOT evaluate — each omission is a
 // scoping decision, not an oversight:
@@ -264,6 +276,32 @@ func (c SchedulingConstraintsFeasibility) Run(ctx context.Context, target Target
 		// cases. When candidates is non-empty this path is feasible and the
 		// (empty) loops below simply produce no findings.
 		return Result{CheckID: c.ID(), Findings: []model.Finding{allMatchingNodesCordonedFinding(workloadRef, resource, len(allCandidates))}}, nil
+	}
+
+	if len(spreadConstraints) == 0 && len(antiAffinityTerms) == 0 {
+		// nodeSelector / required-nodeAffinity-only path. `candidates` is
+		// non-empty here: the zero-label-match branch and the all-cordoned
+		// branch above have already returned otherwise. Compute a SEPARATE
+		// taint-filtered count over `candidates` only — `allCandidates` and
+		// `candidates` themselves stay deliberately taint-blind, consistent
+		// with the spread branch's nodeTaintsPolicy=Ignore default, and
+		// changing them would silently move the spread/anti-affinity
+		// findings. If every schedulable, label-matching node also carries a
+		// NoSchedule/NoExecute taint this workload does not tolerate, the pod
+		// stays Pending forever, the same permanent outcome as zero label
+		// match but for a different reason. The PARTIAL case (some candidates
+		// tolerated) is feasible and produces nothing.
+		tolerations := target.Workload.Tolerations()
+		toleratedCandidates := 0
+		for _, n := range candidates {
+			if nodeToleratesBlockingTaints(n, tolerations) {
+				toleratedCandidates++
+			}
+		}
+		if toleratedCandidates == 0 {
+			return Result{CheckID: c.ID(), Findings: []model.Finding{allMatchingNodesUntoleratedTaintFinding(workloadRef, resource, len(candidates))}}, nil
+		}
+		return Result{CheckID: c.ID()}, nil
 	}
 
 	surge, surgeOK := surgeCount(target.Workload)
@@ -566,6 +604,39 @@ func allMatchingNodesCordonedFinding(workloadRef string, resource model.Resource
 		Remediation: model.Remediation{
 			Summary:          fmt.Sprintf("uncordon at least one node whose labels match %s's nodeSelector/affinity once the maintenance drain that cordoned them is done, or, if the cordon is permanent, adjust the workload's node constraints or add nodes carrying the required labels", workloadRef),
 			Commands:         []string{"kubectl get nodes --show-labels", "kubectl uncordon <node>"},
+			ContextDependent: true,
+		},
+		Resource: resource,
+	}
+}
+
+// allMatchingNodesUntoleratedTaintFinding is emitted on the nodeSelector /
+// required-nodeAffinity-only path when at least one schedulable node matches
+// the workload's node constraints but every one of those nodes carries a
+// NoSchedule/NoExecute taint the workload does not tolerate. Severity is
+// High, not Medium like the cordon case: an untolerated taint on every
+// candidate node is a stable configuration — either the workload is missing
+// the right tolerations, or those nodes are reserved on purpose — not a
+// transient operator action, so a pod that can never be scheduled is High,
+// the same standard as zeroCandidateNodesFinding. matchingSchedulableNodes
+// is computed with a taint-filtered pass over `candidates` that never
+// touches the allCandidates/candidates counts the spread and anti-affinity
+// branches rely on.
+func allMatchingNodesUntoleratedTaintFinding(workloadRef string, resource model.ResourceRef, matchingSchedulableNodes int) model.Finding {
+	return model.Finding{
+		CheckID:  SchedulingConstraintsFeasibilityCheckID,
+		Severity: model.SeverityHigh,
+		Cause: fmt.Sprintf(
+			"%s's nodeSelector/nodeAffinity matches %d schedulable node(s), but every one of them carries a NoSchedule/NoExecute taint this workload does not tolerate: no pod of this workload can be scheduled",
+			workloadRef, matchingSchedulableNodes,
+		),
+		Evidence: []string{
+			fmt.Sprintf("matchingSchedulableNodes=%d", matchingSchedulableNodes),
+			"nodesToleratedByWorkload=0",
+		},
+		Remediation: model.Remediation{
+			Summary:          fmt.Sprintf("add the tolerations that match those nodes' taints to %s's pod template, or, if those nodes are reserved for other workloads, point this workload at a different node pool via its nodeSelector/affinity", workloadRef),
+			Commands:         []string{"kubectl get nodes -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints", "kubectl get nodes --show-labels"},
 			ContextDependent: true,
 		},
 		Resource: resource,
