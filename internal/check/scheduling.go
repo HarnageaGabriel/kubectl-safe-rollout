@@ -183,6 +183,16 @@ func (c SchedulingConstraintsFeasibility) Run(ctx context.Context, target Target
 	if err != nil {
 		return Skip(c.ID(), fmt.Sprintf("Node list is not accessible: %v", err)), nil
 	}
+	if len(nodeList.Items) == 0 {
+		// A successful List that returns nothing is not evidence that the
+		// workload's constraints are infeasible: with no nodes to match
+		// against, RequiredNodeAffinity.Match trivially yields an empty
+		// candidate set even for a workload that declares no node
+		// constraints at all, and the zero-candidate finding below would
+		// then be a misleading "matches zero nodes" claim. Refuse to
+		// conclude instead.
+		return Skip(c.ID(), "the cluster reports zero nodes; scheduling feasibility cannot be evaluated"), nil
+	}
 
 	nodeSelector := target.Workload.NodeSelector()
 	hasNodeConstraints := len(nodeSelector) > 0 ||

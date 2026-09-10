@@ -584,6 +584,28 @@ func TestSchedulingConstraintsFeasibility_NodeListForbidden_Skipped(t *testing.T
 	}
 }
 
+// A successful Node List that returns zero nodes must not be read as
+// "the constraints match nothing": the check refuses to conclude. The
+// fixture carries a real topologySpreadConstraint so this exercises the
+// pre-existing evaluation path, not the nodeSelector-only path.
+func TestSchedulingConstraintsFeasibility_EmptyNodeList_Skipped(t *testing.T) {
+	d := schedulingDeployment(3, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.TopologySpreadConstraints = []corev1.TopologySpreadConstraint{
+			spreadConstraint(zoneKey, 1, corev1.DoNotSchedule, nil),
+		}
+	})
+	res := runSchedulingCheck(t, workload.FromDeployment(d))
+	if !res.Skipped {
+		t.Fatalf("want Skipped=true when the cluster reports zero nodes, got %+v", res)
+	}
+	if res.SkipReason == "" {
+		t.Error("SkipReason must not be empty")
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("want no findings when skipping, got %+v", res.Findings)
+	}
+}
+
 // --- StatefulSet ---
 
 // StatefulSet has no MaxSurge field at all (workload.UpdateStrategy always
