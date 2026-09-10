@@ -107,6 +107,11 @@ func (w *statefulSetWorkload) PodContainers() []corev1.Container {
 	return w.s.Spec.Template.Spec.Containers
 }
 
+// PodTemplate implements Workload: a direct passthrough of spec.template.
+func (w *statefulSetWorkload) PodTemplate() corev1.PodTemplateSpec {
+	return w.s.Spec.Template
+}
+
 // InitContainers implements Workload.
 func (w *statefulSetWorkload) InitContainers() []corev1.Container {
 	return w.s.Spec.Template.Spec.InitContainers

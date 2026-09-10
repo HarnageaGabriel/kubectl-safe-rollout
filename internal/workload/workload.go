@@ -91,6 +91,16 @@ type Workload interface {
 	// must read per-container Probe and Resources: a dedicated DTO would add
 	// indirection without hiding Kubernetes details.
 	PodContainers() []corev1.Container
+	// PodTemplate exposes the whole pod template (spec.template) as written
+	// in the workload manifest, ObjectMeta and Spec together. It exists for
+	// pod-security-admission, which evaluates roughly fifteen PodSpec fields
+	// plus the pod's annotations against the Pod Security Standards: adding
+	// fifteen narrow accessors for that one check would be absurd, the same
+	// reasoning already applied to PodContainers(). Callers that only need
+	// the containers or the volumes should keep using the narrower accessors;
+	// this one is for a consumer that genuinely needs the template as a
+	// whole.
+	PodTemplate() corev1.PodTemplateSpec
 	// InitContainers exposes the pod template's init containers, kept
 	// separate from PodContainers because the two are not interchangeable
 	// for every check: probes on init containers are not a real Kubernetes
@@ -278,6 +288,11 @@ func (w *deploymentWorkload) PodRequests() corev1.ResourceList {
 // PodContainers implements Workload.
 func (w *deploymentWorkload) PodContainers() []corev1.Container {
 	return w.d.Spec.Template.Spec.Containers
+}
+
+// PodTemplate implements Workload: a direct passthrough of spec.template.
+func (w *deploymentWorkload) PodTemplate() corev1.PodTemplateSpec {
+	return w.d.Spec.Template
 }
 
 // InitContainers implements Workload.

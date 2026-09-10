@@ -118,6 +118,11 @@ func (w *daemonSetWorkload) PodContainers() []corev1.Container {
 	return w.d.Spec.Template.Spec.Containers
 }
 
+// PodTemplate implements Workload: a direct passthrough of spec.template.
+func (w *daemonSetWorkload) PodTemplate() corev1.PodTemplateSpec {
+	return w.d.Spec.Template
+}
+
 // InitContainers implements Workload.
 func (w *daemonSetWorkload) InitContainers() []corev1.Container {
 	return w.d.Spec.Template.Spec.InitContainers
