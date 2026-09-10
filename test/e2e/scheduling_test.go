@@ -28,11 +28,12 @@ import (
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/workload"
 )
 
-// These two scenarios are the only scheduling-constraints-feasibility cases
+// These scenarios are the scheduling-constraints-feasibility cases
 // confirmable against a default single-node kind cluster: a nodeSelector
 // that matches zero real nodes (a fact that holds on any cluster topology),
-// and the ordinary no-constraints short-circuit against a real clientset
-// rather than only client-go/kubernetes/fake.
+// with and without an accompanying topologySpreadConstraint, and the
+// ordinary no-constraints short-circuit against a real clientset rather
+// than only client-go/kubernetes/fake.
 //
 // Deliberately NOT covered here: minDomains shortfall and anti-affinity
 // infeasible-across-nodes, both of which need multiple real topology
@@ -44,7 +45,8 @@ import (
 
 // TestCheckE2E_SchedulingConstraints_ZeroCandidateNodes verifies the
 // zero-candidate-nodes finding against a real API server: a nodeSelector
-// that cannot match any real node in the cluster.
+// that cannot match any real node in the cluster, here alongside a
+// topologySpreadConstraint.
 func TestCheckE2E_SchedulingConstraints_ZeroCandidateNodes(t *testing.T) {
 	admin := newE2EClient(t)
 	ns := newE2ENamespace(t, admin)
@@ -90,10 +92,64 @@ func TestCheckE2E_SchedulingConstraints_ZeroCandidateNodes(t *testing.T) {
 	}
 }
 
+// TestCheckE2E_SchedulingConstraints_NodeSelectorOnly_ZeroCandidateNodes
+// verifies the widened guard against a real API server: a Deployment whose
+// only scheduling constraint is a nodeSelector matching zero real nodes —
+// no topologySpreadConstraint, no anti-affinity — must still produce the
+// High zero-candidate finding. Before the guard was widened this returned
+// nothing, while the pods stayed Pending forever ("N node(s) didn't match
+// Pod's node affinity/selector"), which is the gap this closes.
+func TestCheckE2E_SchedulingConstraints_NodeSelectorOnly_ZeroCandidateNodes(t *testing.T) {
+	admin := newE2EClient(t)
+	ns := newE2ENamespace(t, admin)
+	ctx := context.Background()
+
+	podSpec := corev1.PodSpec{
+		NodeSelector: map[string]string{"disktype": "nonexistent-ssd"},
+		Containers: []corev1.Container{{
+			Name:    "app",
+			Image:   "busybox:1.36",
+			Command: []string{"sleep", "3600"},
+		}},
+	}
+	d := deployWorkload(t, admin, ns, "nodeselector-only", 2, podSpec, nil)
+
+	// The pods really are unschedulable: confirm the fact this check is
+	// meant to predict, not only the check's own output.
+	pods, err := admin.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: "app=nodeselector-only"})
+	if err != nil {
+		t.Fatalf("listing pods: %v", err)
+	}
+	for _, p := range pods.Items {
+		if p.Status.Phase != corev1.PodPending {
+			t.Errorf("pod %s: phase = %q, want Pending (nodeSelector matches no node)", p.Name, p.Status.Phase)
+		}
+	}
+
+	target := check.Target{
+		Namespace: ns,
+		Workload:  workload.FromDeployment(d),
+		Client:    admin,
+	}
+	res, err := check.SchedulingConstraintsFeasibility{}.Run(ctx, target)
+	if err != nil {
+		t.Fatalf("Run() returned an unexpected error: %v", err)
+	}
+	if res.Skipped {
+		t.Fatalf("want an evaluated result (List Nodes is unrestricted here), got Skipped: %s", res.SkipReason)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("want exactly 1 finding, got %+v", res.Findings)
+	}
+	if res.Findings[0].Severity != model.SeverityHigh {
+		t.Errorf("severity = %v, want High", res.Findings[0].Severity)
+	}
+}
+
 // TestCheckE2E_SchedulingConstraints_NoConstraints_NoFindings proves the
 // check's short-circuit does not accidentally fire against a real cluster:
 // an ordinary Deployment with neither topologySpreadConstraints nor
-// anti-affinity must produce zero findings.
+// anti-affinity nor a nodeSelector must produce zero findings.
 func TestCheckE2E_SchedulingConstraints_NoConstraints_NoFindings(t *testing.T) {
 	admin := newE2EClient(t)
 	ns := newE2ENamespace(t, admin)
