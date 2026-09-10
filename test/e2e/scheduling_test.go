@@ -19,9 +19,11 @@ package e2e_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/check"
 	"github.com/HarnageaGabriel/kubectl-safe-rollout/internal/model"
@@ -143,6 +145,114 @@ func TestCheckE2E_SchedulingConstraints_NodeSelectorOnly_ZeroCandidateNodes(t *t
 	}
 	if res.Findings[0].Severity != model.SeverityHigh {
 		t.Errorf("severity = %v, want High", res.Findings[0].Severity)
+	}
+}
+
+// TestCheckE2E_SchedulingConstraints_NodeSelectorOnly_AllCandidatesUntoleratedTaint
+// verifies the taint-aware branch against a real API server: a Deployment
+// whose nodeSelector matches a node that exists but carries a
+// NoSchedule taint the pod does not tolerate must produce the High
+// untolerated-taint finding, not the plain zero-candidate one.
+//
+// It labels and taints the single kind node in place and removes both via
+// t.Cleanup. Because e2e scenarios run sequentially this is safe, but the
+// window in which the node is unschedulable is bounded to this test.
+func TestCheckE2E_SchedulingConstraints_NodeSelectorOnly_AllCandidatesUntoleratedTaint(t *testing.T) {
+	admin := newE2EClient(t)
+	ns := newE2ENamespace(t, admin)
+	ctx := context.Background()
+
+	nodes, err := admin.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil || len(nodes.Items) == 0 {
+		t.Fatalf("listing nodes: %v (got %d)", err, len(nodes.Items))
+	}
+	nodeName := nodes.Items[0].Name
+
+	const labelKey, labelVal = "safe-rollout-e2e/pool", "reserved"
+	const taintKey = "safe-rollout-e2e/dedicated"
+	patch := func(mutate func(*corev1.Node)) {
+		live, err := admin.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("reading node %s: %v", nodeName, err)
+		}
+		mutate(live)
+		if _, err := admin.CoreV1().Nodes().Update(ctx, live, metav1.UpdateOptions{}); err != nil {
+			t.Fatalf("updating node %s: %v", nodeName, err)
+		}
+	}
+	patch(func(n *corev1.Node) {
+		if n.Labels == nil {
+			n.Labels = map[string]string{}
+		}
+		n.Labels[labelKey] = labelVal
+		n.Spec.Taints = append(n.Spec.Taints, corev1.Taint{Key: taintKey, Value: "gpu", Effect: corev1.TaintEffectNoSchedule})
+	})
+	t.Cleanup(func() {
+		patch(func(n *corev1.Node) {
+			delete(n.Labels, labelKey)
+			kept := n.Spec.Taints[:0]
+			for _, tn := range n.Spec.Taints {
+				if tn.Key != taintKey {
+					kept = append(kept, tn)
+				}
+			}
+			n.Spec.Taints = kept
+		})
+	})
+
+	podSpec := corev1.PodSpec{
+		NodeSelector: map[string]string{labelKey: labelVal},
+		Containers: []corev1.Container{{
+			Name:    "app",
+			Image:   "busybox:1.36",
+			Command: []string{"sleep", "3600"},
+		}},
+	}
+	d := deployWorkload(t, admin, ns, "tainted-pool", 2, podSpec, nil)
+
+	// The pods really cannot schedule: the node matches the label but the
+	// taint is untolerated.
+	if err := wait.PollUntilContextTimeout(ctx, 2*time.Second, 30*time.Second, true, func(pollCtx context.Context) (bool, error) {
+		pods, err := admin.CoreV1().Pods(ns).List(pollCtx, metav1.ListOptions{LabelSelector: "app=tainted-pool"})
+		if err != nil {
+			return false, err
+		}
+		if len(pods.Items) == 0 {
+			return false, nil
+		}
+		for _, p := range pods.Items {
+			if p.Status.Phase != corev1.PodPending {
+				return false, nil
+			}
+		}
+		return true, nil
+	}); err != nil {
+		t.Fatalf("expected the workload's pods to stay Pending (label matches, taint untolerated): %v", err)
+	}
+
+	target := check.Target{Namespace: ns, Workload: workload.FromDeployment(d), Client: admin}
+	res, err := check.SchedulingConstraintsFeasibility{}.Run(ctx, target)
+	if err != nil {
+		t.Fatalf("Run() returned an unexpected error: %v", err)
+	}
+	if res.Skipped {
+		t.Fatalf("want an evaluated result, got Skipped: %s", res.SkipReason)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("want exactly 1 finding, got %+v", res.Findings)
+	}
+	f := res.Findings[0]
+	if f.Severity != model.SeverityHigh {
+		t.Errorf("severity = %v, want High", f.Severity)
+	}
+	foundTaintEvidence := false
+	for _, e := range f.Evidence {
+		if e == "nodesToleratedByWorkload=0" {
+			foundTaintEvidence = true
+		}
+	}
+	if !foundTaintEvidence {
+		t.Errorf("finding must be the untolerated-taint variant (evidence nodesToleratedByWorkload=0), got %+v", f.Evidence)
 	}
 }
 
