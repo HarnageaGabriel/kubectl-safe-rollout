@@ -51,6 +51,7 @@ func registeredChecks() []check.Check {
 		check.NetworkPolicyIngress{},
 		check.SchedulingConstraintsFeasibility{},
 		check.AdmissionWebhookVisibility{},
+		check.PodSecurityAdmission{},
 		check.RequestsVsUsage{},
 		check.ProbeSanity{},
 		check.ResourceLimits{},

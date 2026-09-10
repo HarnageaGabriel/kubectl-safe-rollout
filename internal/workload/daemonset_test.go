@@ -154,6 +154,26 @@ func TestFromDaemonSet_PodRequests_InitContainers_Volumes_PodSelector(t *testing
 	}
 }
 
+func TestFromDaemonSet_PodTemplate_PassesThroughMetadataAndSpec(t *testing.T) {
+	d := &appsv1.DaemonSet{Spec: appsv1.DaemonSetSpec{
+		Template: corev1.PodTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "logger"}},
+			Spec: corev1.PodSpec{
+				HostIPC:    true,
+				Containers: []corev1.Container{{Name: "app"}},
+			},
+		},
+	}}
+
+	tmpl := workload.FromDaemonSet(d).PodTemplate()
+	if !tmpl.Spec.HostIPC {
+		t.Errorf("PodTemplate().Spec.HostIPC = false, want the template's true")
+	}
+	if tmpl.Labels["app"] != "logger" {
+		t.Errorf("PodTemplate() labels = %+v, want app=logger", tmpl.Labels)
+	}
+}
+
 func TestFromDaemonSet_RolloutComplete(t *testing.T) {
 	if !workload.FromDaemonSet(daemonSetBase()).RolloutComplete() {
 		t.Fatal("fully available rollout must be reported as complete")

@@ -171,6 +171,7 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 		check.NetworkPolicyIngress{},
 		check.SchedulingConstraintsFeasibility{},
 		check.AdmissionWebhookVisibility{},
+		check.PodSecurityAdmission{},
 		check.ProbeSanity{},
 		check.ResourceLimits{},
 		check.ImagePullSecrets{},
@@ -236,7 +237,12 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 	// very first operation, unconditionally, before it ever inspects the
 	// pod template: no dedicated fixture is needed either, the same as
 	// pdb-eviction-blocked above.
-	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.IngressClassExistsCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.PriorityClassExistsCheckID, check.SchedulingConstraintsFeasibilityCheckID, check.SelectorOverlapCheckID, check.AdmissionWebhookVisibilityCheckID, check.PDBEvictionBlockedCheckID, check.LimitRangeFeasibilityCheckID} {
+	// pod-security-admission does a single live read — Namespaces().Get on
+	// the target namespace — as its first, unconditional operation, before
+	// it ever inspects the pod template: the restricted Role above grants
+	// nothing on the cluster-scoped namespaces resource, so that Get is
+	// denied and the check Skips, again with no dedicated fixture needed.
+	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.IngressClassExistsCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.PriorityClassExistsCheckID, check.SchedulingConstraintsFeasibilityCheckID, check.SelectorOverlapCheckID, check.AdmissionWebhookVisibilityCheckID, check.PodSecurityAdmissionCheckID, check.PDBEvictionBlockedCheckID, check.LimitRangeFeasibilityCheckID} {
 		if !contains(skipped, want) {
 			t.Errorf("check %q needs a resource the Role withholds and must skip, not fail or silently report clean (evaluated=%v, skipped=%v)", want, evaluated, skipped)
 		}

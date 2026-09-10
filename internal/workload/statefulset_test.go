@@ -354,6 +354,26 @@ func TestFromStatefulSet_PodRequests_InitContainers_Volumes_PodSelector(t *testi
 	}
 }
 
+func TestFromStatefulSet_PodTemplate_PassesThroughMetadataAndSpec(t *testing.T) {
+	s := &appsv1.StatefulSet{Spec: appsv1.StatefulSetSpec{
+		Template: corev1.PodTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "db"}},
+			Spec: corev1.PodSpec{
+				HostPID:    true,
+				Containers: []corev1.Container{{Name: "app"}},
+			},
+		},
+	}}
+
+	tmpl := workload.FromStatefulSet(s).PodTemplate()
+	if !tmpl.Spec.HostPID {
+		t.Errorf("PodTemplate().Spec.HostPID = false, want the template's true")
+	}
+	if tmpl.Labels["app"] != "db" {
+		t.Errorf("PodTemplate() labels = %+v, want app=db", tmpl.Labels)
+	}
+}
+
 func TestFromStatefulSet_DesiredCount(t *testing.T) {
 	s := statefulSetBase()
 	count, observed := workload.FromStatefulSet(s).DesiredCount()

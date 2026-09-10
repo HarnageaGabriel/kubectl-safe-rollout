@@ -146,6 +146,32 @@ func TestFromDeployment_InitContainers_ExcludesRegularContainers(t *testing.T) {
 	}
 }
 
+func TestFromDeployment_PodTemplate_PassesThroughMetadataAndSpec(t *testing.T) {
+	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{
+		Template: corev1.PodTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels:      map[string]string{"app": "api"},
+				Annotations: map[string]string{"container.apparmor.security.beta.kubernetes.io/app": "runtime/default"},
+			},
+			Spec: corev1.PodSpec{
+				HostNetwork: true,
+				Containers:  []corev1.Container{{Name: "app"}},
+			},
+		},
+	}}
+
+	tmpl := workload.FromDeployment(d).PodTemplate()
+	if !tmpl.Spec.HostNetwork {
+		t.Errorf("PodTemplate().Spec.HostNetwork = false, want the template's true")
+	}
+	if tmpl.Annotations["container.apparmor.security.beta.kubernetes.io/app"] != "runtime/default" {
+		t.Errorf("PodTemplate() lost the pod template annotation: %+v", tmpl.Annotations)
+	}
+	if len(tmpl.Spec.Containers) != 1 || tmpl.Spec.Containers[0].Name != "app" {
+		t.Errorf("PodTemplate().Spec.Containers = %+v, want the single app container", tmpl.Spec.Containers)
+	}
+}
+
 func TestFromDeployment_ImagePullSecretsAndServiceAccount(t *testing.T) {
 	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{
 		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
