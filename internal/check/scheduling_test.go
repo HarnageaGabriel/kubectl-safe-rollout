@@ -584,6 +584,282 @@ func TestSchedulingConstraintsFeasibility_NodeListForbidden_Skipped(t *testing.T
 	}
 }
 
+// A successful Node List that returns zero nodes must not be read as
+// "the constraints match nothing": the check refuses to conclude. The
+// fixture carries a real topologySpreadConstraint so this exercises the
+// pre-existing evaluation path, not the nodeSelector-only path.
+func TestSchedulingConstraintsFeasibility_EmptyNodeList_Skipped(t *testing.T) {
+	d := schedulingDeployment(3, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.TopologySpreadConstraints = []corev1.TopologySpreadConstraint{
+			spreadConstraint(zoneKey, 1, corev1.DoNotSchedule, nil),
+		}
+	})
+	res := runSchedulingCheck(t, workload.FromDeployment(d))
+	if !res.Skipped {
+		t.Fatalf("want Skipped=true when the cluster reports zero nodes, got %+v", res)
+	}
+	if res.SkipReason == "" {
+		t.Error("SkipReason must not be empty")
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("want no findings when skipping, got %+v", res.Findings)
+	}
+}
+
+// --- nodeSelector / required-nodeAffinity-only path ---
+
+func schedulingNodesListed(client *fake.Clientset) bool {
+	for _, a := range client.Actions() {
+		if a.GetResource().Resource == "nodes" {
+			return true
+		}
+	}
+	return false
+}
+
+// A workload whose only scheduling constraint is a nodeSelector that
+// matches no live node must surface the same High finding as the
+// nodeSelector+spread case — the widened guard now reaches the candidate
+// computation for it.
+func TestSchedulingConstraintsFeasibility_NodeSelectorOnly_ZeroMatchingNodes_HighFinding(t *testing.T) {
+	d := schedulingDeployment(3, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.NodeSelector = map[string]string{"tier": "gpu"}
+	})
+	nodes := nodeObjects(testNode("node-a", map[string]string{"tier": "web"}))
+	res := runSchedulingCheck(t, workload.FromDeployment(d), nodes...)
+	if res.Skipped || len(res.Findings) != 1 {
+		t.Fatalf("want exactly 1 finding, got %+v", res)
+	}
+	f := res.Findings[0]
+	if f.Severity != model.SeverityHigh {
+		t.Errorf("severity = %v, want High: nodeSelector matches no node", f.Severity)
+	}
+	if !evidenceContains(f.Evidence, "matchingNodes=0") {
+		t.Errorf("evidence must state zero matching nodes, got %+v", f.Evidence)
+	}
+	if !f.Remediation.ContextDependent {
+		t.Errorf("remediation must declare itself context-dependent")
+	}
+}
+
+// Same as above but driven purely by
+// affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution,
+// with no plain nodeSelector: proves hasNodeConstraints also widens the
+// guard for the required nodeAffinity shape.
+func TestSchedulingConstraintsFeasibility_RequiredNodeAffinityOnly_ZeroMatchingNodes_HighFinding(t *testing.T) {
+	d := schedulingDeployment(3, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.Affinity = &corev1.Affinity{
+			NodeAffinity: &corev1.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+						MatchExpressions: []corev1.NodeSelectorRequirement{{
+							Key: "tier", Operator: corev1.NodeSelectorOpIn, Values: []string{"gpu"},
+						}},
+					}},
+				},
+			},
+		}
+	})
+	nodes := nodeObjects(testNode("node-a", map[string]string{"tier": "web"}))
+	res := runSchedulingCheck(t, workload.FromDeployment(d), nodes...)
+	if res.Skipped || len(res.Findings) != 1 {
+		t.Fatalf("want exactly 1 finding, got %+v", res)
+	}
+	if res.Findings[0].Severity != model.SeverityHigh {
+		t.Errorf("severity = %v, want High", res.Findings[0].Severity)
+	}
+	if !evidenceContains(res.Findings[0].Evidence, "matchingNodes=0") {
+		t.Errorf("evidence must state zero matching nodes, got %+v", res.Findings[0].Evidence)
+	}
+}
+
+// A nodeSelector that DOES match a schedulable node produces no finding,
+// and the run must have reached the Nodes API (proving the new path
+// executed rather than short-circuiting on the old guard).
+func TestSchedulingConstraintsFeasibility_NodeSelectorOnly_MatchingNodeExists_NoFindings(t *testing.T) {
+	d := schedulingDeployment(3, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.NodeSelector = map[string]string{"tier": "web"}
+	})
+	client := fake.NewSimpleClientset(testNode("node-a", map[string]string{"tier": "web"}))
+	res, err := check.SchedulingConstraintsFeasibility{}.Run(context.Background(), check.Target{
+		Namespace: testNamespace,
+		Workload:  workload.FromDeployment(d),
+		Client:    client,
+	})
+	if err != nil {
+		t.Fatalf("Run() returned an unexpected error: %v", err)
+	}
+	if res.Skipped || len(res.Findings) != 0 {
+		t.Fatalf("a matching schedulable node exists: want empty result, got %+v", res)
+	}
+	if !schedulingNodesListed(client) {
+		t.Fatal("the new nodeSelector-only path must reach Nodes().List()")
+	}
+}
+
+// Every node that matches the nodeSelector is cordoned: Medium, not High,
+// because uncordoning any one of them restores feasibility. Evidence must
+// carry the "if uncordoned" count.
+func TestSchedulingConstraintsFeasibility_NodeSelectorOnly_AllMatchingNodesCordoned_MediumFinding(t *testing.T) {
+	d := schedulingDeployment(2, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.NodeSelector = map[string]string{"tier": "web"}
+	})
+	nodes := nodeObjects(
+		testNode("node-a", map[string]string{"tier": "web"}, cordoned),
+		testNode("node-b", map[string]string{"tier": "other"}),
+	)
+	res := runSchedulingCheck(t, workload.FromDeployment(d), nodes...)
+	if res.Skipped || len(res.Findings) != 1 {
+		t.Fatalf("want exactly 1 finding, got %+v", res)
+	}
+	f := res.Findings[0]
+	if f.Severity != model.SeverityMedium {
+		t.Fatalf("severity = %v, want Medium: feasible once a matching node is uncordoned", f.Severity)
+	}
+	if !evidenceContains(f.Evidence, "cordonedNodes=1") || !evidenceContains(f.Evidence, "matchingNodesIfUncordoned=1") {
+		t.Errorf("evidence must carry the cordoned count and the if-uncordoned count, got %+v", f.Evidence)
+	}
+	if !f.Remediation.ContextDependent {
+		t.Errorf("remediation must declare itself context-dependent")
+	}
+}
+
+// A nodeSelector-only workload whose Node list is denied degrades to
+// Skipped, exactly like the spread-constraint case, rather than emitting a
+// spurious "matches zero nodes" finding.
+func TestSchedulingConstraintsFeasibility_NodeSelectorOnly_NodeListForbidden_Skipped(t *testing.T) {
+	d := schedulingDeployment(3, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.NodeSelector = map[string]string{"tier": "web"}
+	})
+	client := fake.NewSimpleClientset()
+	client.PrependReactor("list", "nodes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("forbidden: RBAC denies listing Nodes")
+	})
+	res, err := check.SchedulingConstraintsFeasibility{}.Run(context.Background(), check.Target{
+		Namespace: testNamespace,
+		Workload:  workload.FromDeployment(d),
+		Client:    client,
+	})
+	if err != nil {
+		t.Fatalf("Run() must degrade to Skipped, not error: %v", err)
+	}
+	if !res.Skipped || res.SkipReason == "" {
+		t.Fatalf("want Skipped=true with a reason, got %+v", res)
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("want no findings when skipping, got %+v", res.Findings)
+	}
+}
+
+// A non-default schedulerName skips before any API call even on the new
+// nodeSelector-only path: the capacity model is kube-scheduler-specific.
+func TestSchedulingConstraintsFeasibility_NodeSelectorOnly_NonDefaultScheduler_NoFindingNoAPICall(t *testing.T) {
+	d := schedulingDeployment(3, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.NodeSelector = map[string]string{"tier": "web"}
+		spec.SchedulerName = "custom-scheduler"
+	})
+	client := fake.NewSimpleClientset(testNode("node-a", map[string]string{"tier": "other"}))
+	res, err := check.SchedulingConstraintsFeasibility{}.Run(context.Background(), check.Target{
+		Namespace: testNamespace,
+		Workload:  workload.FromDeployment(d),
+		Client:    client,
+	})
+	if err != nil {
+		t.Fatalf("Run() returned an unexpected error: %v", err)
+	}
+	if res.Skipped || len(res.Findings) != 0 {
+		t.Fatalf("a non-default scheduler must produce an empty result, got %+v", res)
+	}
+	if schedulingNodesListed(client) {
+		t.Fatal("must not call the Nodes API for a non-default scheduler")
+	}
+}
+
+// replicas==0 short-circuits before any API call, new path or not.
+func TestSchedulingConstraintsFeasibility_NodeSelectorOnly_ZeroReplicas_NoAPICall(t *testing.T) {
+	d := schedulingDeployment(0, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.NodeSelector = map[string]string{"tier": "web"}
+	})
+	client := fake.NewSimpleClientset(testNode("node-a", map[string]string{"tier": "other"}))
+	res, err := check.SchedulingConstraintsFeasibility{}.Run(context.Background(), check.Target{
+		Namespace: testNamespace,
+		Workload:  workload.FromDeployment(d),
+		Client:    client,
+	})
+	if err != nil {
+		t.Fatalf("Run() returned an unexpected error: %v", err)
+	}
+	if res.Skipped || len(res.Findings) != 0 {
+		t.Fatalf("a workload scaled to zero has nothing to schedule: want empty result, got %+v", res)
+	}
+	if schedulingNodesListed(client) {
+		t.Fatal("must not call the Nodes API when replicas is 0")
+	}
+}
+
+// DaemonSet still always skips before any API call, even when its only
+// constraint is a nodeSelector.
+func TestSchedulingConstraintsFeasibility_DaemonSet_NodeSelectorOnly_Skipped(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "logger", Namespace: testNamespace},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: podLabels()},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: podLabels()},
+				Spec: corev1.PodSpec{
+					NodeSelector: map[string]string{"tier": "web"},
+				},
+			},
+		},
+		Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 3},
+	}
+	client := fake.NewSimpleClientset()
+	client.PrependReactor("list", "nodes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		t.Fatal("must not list Nodes for a DaemonSet target")
+		return false, nil, nil
+	})
+	res, err := check.SchedulingConstraintsFeasibility{}.Run(context.Background(), check.Target{
+		Namespace: testNamespace,
+		Workload:  workload.FromDaemonSet(ds),
+		Client:    client,
+	})
+	if err != nil {
+		t.Fatalf("Run() returned an unexpected error: %v", err)
+	}
+	if !res.Skipped || res.SkipReason == "" {
+		t.Fatalf("want Skipped=true with a reason for a DaemonSet target, got %+v", res)
+	}
+}
+
+// Required nodeAffinity that does not parse (In operator with no values)
+// must degrade to Skipped, not be reported as "matches zero nodes".
+func TestSchedulingConstraintsFeasibility_MalformedRequiredNodeAffinity_Skipped(t *testing.T) {
+	d := schedulingDeployment(3, noSurgeStrategy(), func(spec *corev1.PodSpec) {
+		spec.Affinity = &corev1.Affinity{
+			NodeAffinity: &corev1.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+						MatchExpressions: []corev1.NodeSelectorRequirement{{
+							Key: "tier", Operator: corev1.NodeSelectorOpIn, Values: nil,
+						}},
+					}},
+				},
+			},
+		}
+	})
+	nodes := nodeObjects(testNode("node-a", map[string]string{"tier": "web"}))
+	res := runSchedulingCheck(t, workload.FromDeployment(d), nodes...)
+	if !res.Skipped {
+		t.Fatalf("want Skipped=true when required nodeAffinity cannot be parsed, got %+v", res)
+	}
+	if !strings.Contains(res.SkipReason, "could not be evaluated") {
+		t.Errorf("SkipReason must explain the affinity could not be evaluated, got %q", res.SkipReason)
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("want no findings when skipping, got %+v", res.Findings)
+	}
+}
+
 // --- StatefulSet ---
 
 // StatefulSet has no MaxSurge field at all (workload.UpdateStrategy always
