@@ -226,29 +226,7 @@ func (c SchedulingConstraintsFeasibility) Run(ctx context.Context, target Target
 		return Skip(c.ID(), "the cluster reports zero nodes; scheduling feasibility cannot be evaluated"), nil
 	}
 
-	requiredAffinity := nodeaffinity.NewRequiredNodeAffinity(nodeSelector, affinity)
-
-	var allCandidates, candidates []corev1.Node
-	var matchErr error
-	for _, n := range nodeList.Items {
-		ok, err := requiredAffinity.Match(&n)
-		if err != nil {
-			// RequiredNodeAffinity.Match only surfaces a parse error for a
-			// node it could not otherwise match (see the vendored
-			// LazyErrorNodeSelector contract): record it, keep going, and
-			// let the zero-candidate branch below decide whether it
-			// matters.
-			matchErr = err
-			continue
-		}
-		if !ok {
-			continue
-		}
-		allCandidates = append(allCandidates, n)
-		if !n.Spec.Unschedulable {
-			candidates = append(candidates, n)
-		}
-	}
+	allCandidates, candidates, matchErr := candidateNodes(nodeList.Items, nodeSelector, affinity)
 	cordonedCount := len(allCandidates) - len(candidates)
 
 	workloadRef := fmt.Sprintf("%s/%s", target.Workload.Kind(), target.Workload.Name())
@@ -336,6 +314,46 @@ func (c SchedulingConstraintsFeasibility) Run(ctx context.Context, target Target
 	}
 
 	return Result{CheckID: c.ID(), Findings: findings}, nil
+}
+
+// candidateNodes filters nodes down to those whose labels satisfy
+// nodeSelector/affinity's required node affinity
+// (nodeaffinity.RequiredNodeAffinity.Match, the exact predicate
+// kube-scheduler's own NodeAffinity plugin applies), split into
+// allCandidates (label match only) and candidates (label match AND
+// schedulable, i.e. not cordoned via spec.unschedulable). matchErr
+// surfaces a parse error from RequiredNodeAffinity.Match for a node it
+// could not otherwise match (see the vendored LazyErrorNodeSelector
+// contract) — callers decide whether an empty allCandidates combined with
+// a non-nil matchErr should be read as "could not evaluate" rather than
+// "matches zero nodes", the same distinction
+// SchedulingConstraintsFeasibility.Run already makes.
+//
+// Both returned slices are deliberately taint-blind: they exclude only
+// non-matching labels and cordoned nodes, never taints, consistent with
+// the nodeTaintsPolicy=Ignore default documented on
+// SchedulingConstraintsFeasibility. A caller that needs a taint-filtered
+// subset must apply nodeToleratesBlockingTaints itself, the same way
+// SchedulingConstraintsFeasibility.Run already does for its
+// nodeSelector-only path — extracted here so NodeCapacityFeasibility can
+// reuse the identical node-matching logic without duplicating it.
+func candidateNodes(nodes []corev1.Node, nodeSelector map[string]string, affinity *corev1.Affinity) (allCandidates, candidates []corev1.Node, matchErr error) {
+	requiredAffinity := nodeaffinity.NewRequiredNodeAffinity(nodeSelector, affinity)
+	for _, n := range nodes {
+		ok, err := requiredAffinity.Match(&n)
+		if err != nil {
+			matchErr = err
+			continue
+		}
+		if !ok {
+			continue
+		}
+		allCandidates = append(allCandidates, n)
+		if !n.Spec.Unschedulable {
+			candidates = append(candidates, n)
+		}
+	}
+	return allCandidates, candidates, matchErr
 }
 
 // surgeContext bundles the replica/surge/maxUnavailable numbers every
