@@ -172,6 +172,7 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 		check.PDBEvictionBlocked{},
 		check.QuotaHeadroom{},
 		check.HPAQuotaHeadroom{},
+		check.QuotaObjectCount{},
 		check.LimitRangeFeasibility{},
 		check.SelectorOverlap{},
 		check.ServiceAccountExists{},
@@ -262,7 +263,12 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 	// request added to the pod template above exists solely to get this
 	// check past its own "nothing to evaluate" guard and into that List
 	// call.
-	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.IngressClassExistsCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.PriorityClassExistsCheckID, check.SchedulingConstraintsFeasibilityCheckID, check.NodeCapacityFeasibilityCheckID, check.SelectorOverlapCheckID, check.AdmissionWebhookVisibilityCheckID, check.PodSecurityAdmissionCheckID, check.PDBEvictionBlockedCheckID, check.LimitRangeFeasibilityCheckID} {
+	// quota-object-count lists ResourceQuotas as its very first,
+	// unconditional operation (also not granted, same resourcequotas gap
+	// quota-headroom already exercises), before it ever inspects the pod
+	// template or the workload Kind: no dedicated fixture is needed either,
+	// the same as pdb-eviction-blocked/limitrange-feasibility above.
+	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.IngressClassExistsCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.QuotaObjectCountCheckID, check.PriorityClassExistsCheckID, check.SchedulingConstraintsFeasibilityCheckID, check.NodeCapacityFeasibilityCheckID, check.SelectorOverlapCheckID, check.AdmissionWebhookVisibilityCheckID, check.PodSecurityAdmissionCheckID, check.PDBEvictionBlockedCheckID, check.LimitRangeFeasibilityCheckID} {
 		if !contains(skipped, want) {
 			t.Errorf("check %q needs a resource the Role withholds and must skip, not fail or silently report clean (evaluated=%v, skipped=%v)", want, evaluated, skipped)
 		}

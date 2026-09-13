@@ -38,6 +38,7 @@ func registeredChecks() []check.Check {
 		check.PDBEvictionBlocked{},
 		check.QuotaHeadroom{},
 		check.HPAQuotaHeadroom{},
+		check.QuotaObjectCount{},
 		check.LimitRangeFeasibility{},
 		check.SelectorOverlap{},
 		check.ServiceAccountExists{},
