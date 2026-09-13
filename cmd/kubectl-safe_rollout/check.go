@@ -50,6 +50,7 @@ func registeredChecks() []check.Check {
 		check.StorageClassExists{},
 		check.NetworkPolicyIngress{},
 		check.SchedulingConstraintsFeasibility{},
+		check.NodeCapacityFeasibility{},
 		check.AdmissionWebhookVisibility{},
 		check.PodSecurityAdmission{},
 		check.RequestsVsUsage{},

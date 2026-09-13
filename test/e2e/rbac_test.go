@@ -98,6 +98,19 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 					},
 				},
 			}},
+			// Gives node-capacity-feasibility something to actually
+			// evaluate: without a declared cpu/memory request it
+			// short-circuits before ever calling Nodes().List(), the same
+			// mistake already made once for config-references-exist (see
+			// CLAUDE.md's recurring-maintenance note) — a request this
+			// small would never be flagged by the check itself, only used
+			// to reach its degrade path.
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("10m"),
+					corev1.ResourceMemory: resource.MustParse("16Mi"),
+				},
+			},
 		}},
 		// Gives pvc-exists something to actually Get (and be denied) too.
 		Volumes: []corev1.Volume{{
@@ -170,6 +183,7 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 		check.PVCExists{},
 		check.NetworkPolicyIngress{},
 		check.SchedulingConstraintsFeasibility{},
+		check.NodeCapacityFeasibility{},
 		check.AdmissionWebhookVisibility{},
 		check.PodSecurityAdmission{},
 		check.ProbeSanity{},
@@ -242,7 +256,13 @@ func TestCheckE2E_RestrictedRBAC_SkipsInsteadOfFailing(t *testing.T) {
 	// it ever inspects the pod template: the restricted Role above grants
 	// nothing on the cluster-scoped namespaces resource, so that Get is
 	// denied and the check Skips, again with no dedicated fixture needed.
-	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.IngressClassExistsCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.PriorityClassExistsCheckID, check.SchedulingConstraintsFeasibilityCheckID, check.SelectorOverlapCheckID, check.AdmissionWebhookVisibilityCheckID, check.PodSecurityAdmissionCheckID, check.PDBEvictionBlockedCheckID, check.LimitRangeFeasibilityCheckID} {
+	// node-capacity-feasibility needs to list the cluster-scoped nodes
+	// resource, exactly like scheduling-constraints-feasibility (also not
+	// granted — a namespaced Role can never grant it): the small cpu/memory
+	// request added to the pod template above exists solely to get this
+	// check past its own "nothing to evaluate" guard and into that List
+	// call.
+	for _, want := range []string{check.ServiceRoutingCheckID, check.IngressRoutingCheckID, check.IngressClassExistsCheckID, check.ConfigReferencesExistCheckID, check.PVCExistsCheckID, check.NetworkPolicyIngressCheckID, check.HPAQuotaHeadroomCheckID, check.PriorityClassExistsCheckID, check.SchedulingConstraintsFeasibilityCheckID, check.NodeCapacityFeasibilityCheckID, check.SelectorOverlapCheckID, check.AdmissionWebhookVisibilityCheckID, check.PodSecurityAdmissionCheckID, check.PDBEvictionBlockedCheckID, check.LimitRangeFeasibilityCheckID} {
 		if !contains(skipped, want) {
 			t.Errorf("check %q needs a resource the Role withholds and must skip, not fail or silently report clean (evaluated=%v, skipped=%v)", want, evaluated, skipped)
 		}
