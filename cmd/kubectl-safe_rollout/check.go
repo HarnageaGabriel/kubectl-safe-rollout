@@ -53,6 +53,7 @@ func registeredChecks() []check.Check {
 		check.SchedulingConstraintsFeasibility{},
 		check.NodeCapacityFeasibility{},
 		check.AdmissionWebhookVisibility{},
+		check.ValidatingAdmissionPolicyVisibility{},
 		check.PodSecurityAdmission{},
 		check.RequestsVsUsage{},
 		check.ProbeSanity{},
