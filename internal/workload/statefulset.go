@@ -242,6 +242,20 @@ func (w *statefulSetWorkload) ProgressDeadlineExceeded() (message string, ok boo
 	return "", false
 }
 
+// ReplicaSetCreateError implements Workload. The StatefulSet controller
+// creates Pods directly (no ReplicaSet, see PodCreationSource in
+// internal/diagnose) and has no "Progressing" condition type at all (same
+// fact already cited by ProgressDeadlineExceeded above), so this signal
+// cannot exist for this kind. StatefulSet's own quota-exhaustion equivalent
+// (count/controllerrevisions.apps) was verified live in a prior session to
+// be completely silent instead — no condition, no event anywhere in the
+// namespace (see internal/check/quotaobjectcount.go's doc comment) — so
+// there is nothing reactive for a diagnoser to read here either. Always
+// ok=false.
+func (w *statefulSetWorkload) ReplicaSetCreateError() (message string, ok bool) {
+	return "", false
+}
+
 // Paused implements Workload. StatefulSet has no spec.paused field at all:
 // this method exists on the interface only because Deployment has pause
 // semantics that watch must account for. false here is a hard fact about the

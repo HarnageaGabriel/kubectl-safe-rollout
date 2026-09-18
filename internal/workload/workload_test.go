@@ -367,6 +367,28 @@ func TestFromDeployment_ProgressDeadlineExceeded(t *testing.T) {
 	}
 }
 
+func TestFromDeployment_ReplicaSetCreateError(t *testing.T) {
+	d := &appsv1.Deployment{Status: appsv1.DeploymentStatus{Conditions: []appsv1.DeploymentCondition{{
+		Type: appsv1.DeploymentProgressing, Reason: "ReplicaSetCreateError", Message: "Failed to create new replica set \"app-abc123\": exceeded quota",
+	}}}}
+	message, ok := workload.FromDeployment(d).ReplicaSetCreateError()
+	if !ok || message != "Failed to create new replica set \"app-abc123\": exceeded quota" {
+		t.Fatalf("expected create-error condition, got message=%q ok=%v", message, ok)
+	}
+
+	d.Status.Conditions[0].Reason = "NewReplicaSetAvailable"
+	if _, ok := workload.FromDeployment(d).ReplicaSetCreateError(); ok {
+		t.Fatal("a Progressing condition with a different Reason must not be reported as a create error")
+	}
+}
+
+func TestFromDeployment_ReplicaSetCreateError_NoCondition(t *testing.T) {
+	d := &appsv1.Deployment{}
+	if _, ok := workload.FromDeployment(d).ReplicaSetCreateError(); ok {
+		t.Fatal("no Progressing condition at all must report ok=false, not a stale positive")
+	}
+}
+
 func TestFromDeployment_DesiredCount(t *testing.T) {
 	d := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Generation: 3},

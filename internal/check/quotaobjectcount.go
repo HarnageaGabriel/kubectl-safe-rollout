@@ -185,11 +185,14 @@ var quotaObjectCountResources = map[string]quotaObjectCountResource{
 // the Remediation instead; listing them here would add API cost this v1
 // does not need.
 //
-// Follow-up, not built here: a reactive diagnoser in internal/diagnose (for
-// example "replicaset-create-error") that classifies the
-// Reason=ReplicaSetCreateError condition/event captured verbatim above, the
-// same way internal/diagnose/quota.go already classifies FailedCreate. Left
-// for a future change.
+// The reactive counterpart to the Deployment case captured verbatim above
+// now exists: internal/diagnose/replicasetcreate.go classifies the
+// Reason=ReplicaSetCreateError condition/event into
+// "replicaset-create-quota-exceeded"/"replicaset-create-undetermined", the
+// same way internal/diagnose/quota.go already classifies FailedCreate. Not
+// built for StatefulSet/DaemonSet: their equivalent failure is completely
+// silent (see above), so there is nothing reactive to classify for those
+// two kinds.
 type QuotaObjectCount struct{}
 
 // ID implements check.Check.

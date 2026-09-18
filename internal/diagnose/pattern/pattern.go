@@ -129,6 +129,13 @@ func FailedScheduling(message string) (cause string, ok bool) {
 // unlike the scheduler/kubelet messages above: it is still isolated here
 // with the others, not in Diagnoser logic, for the same maintainability
 // reason.
+//
+// The same verbatim prefix also appears inside a Deployment's own
+// "Progressing" condition/event when Reason=="ReplicaSetCreateError" (see
+// CauseReplicaSetCreateQuotaExceeded in internal/diagnose/cause.go): the
+// admission plugin produces the identical rejection message regardless of
+// which object attempted the create, so this same function classifies both
+// without any new pattern. Verified live on kind this session.
 func QuotaExceeded(message string) bool {
 	return strings.Contains(strings.ToLower(message), "exceeded quota")
 }
