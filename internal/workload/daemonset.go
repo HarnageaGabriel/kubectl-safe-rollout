@@ -218,6 +218,20 @@ func (w *daemonSetWorkload) ProgressDeadlineExceeded() (message string, ok bool)
 	return "", false
 }
 
+// ReplicaSetCreateError implements Workload. The DaemonSet controller
+// creates Pods directly (no ReplicaSet, see PodCreationSource in
+// internal/diagnose) and DaemonSetConditionType declares zero condition
+// constants (same fact already cited by ProgressDeadlineExceeded above): no
+// "Progressing" condition exists for this controller to write. DaemonSet's
+// own quota-exhaustion equivalent (count/controllerrevisions.apps) was
+// verified live in a prior session to be completely silent instead — no
+// condition, no event anywhere in the namespace (see
+// internal/check/quotaobjectcount.go's doc comment) — so there is nothing
+// reactive for a diagnoser to read here either. Always ok=false.
+func (w *daemonSetWorkload) ReplicaSetCreateError() (message string, ok bool) {
+	return "", false
+}
+
 // Paused implements Workload. DaemonSet has no spec.paused field at all: a
 // hard fact about the DaemonSet API, not a placeholder for "unknown".
 func (w *daemonSetWorkload) Paused() bool {

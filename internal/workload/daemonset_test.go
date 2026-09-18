@@ -213,6 +213,13 @@ func TestFromDaemonSet_ProgressDeadlineExceeded_AlwaysNotApplicable(t *testing.T
 	}
 }
 
+func TestFromDaemonSet_ReplicaSetCreateError_AlwaysNotApplicable(t *testing.T) {
+	d := &appsv1.DaemonSet{}
+	if _, ok := workload.FromDaemonSet(d).ReplicaSetCreateError(); ok {
+		t.Fatal("DaemonSet has no ReplicaSet or Progressing condition: ok must always be false")
+	}
+}
+
 func TestFromDaemonSet_Paused_AlwaysFalse(t *testing.T) {
 	d := &appsv1.DaemonSet{}
 	if workload.FromDaemonSet(d).Paused() {

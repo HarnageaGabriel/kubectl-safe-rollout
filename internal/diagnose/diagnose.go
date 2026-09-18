@@ -134,6 +134,7 @@ func registeredDiagnosers() []Diagnoser {
 		Readiness{},
 		Pending{},
 		Quota{},
+		ReplicaSetCreate{},
 		ProgressDeadline{},
 		Paused{},
 		StatefulSetUpdate{},

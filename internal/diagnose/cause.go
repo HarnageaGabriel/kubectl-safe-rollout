@@ -195,4 +195,37 @@ const (
 	// deliberately excluded: that is healthy, intentional throttling, not a
 	// stuck rollout.
 	CauseStatefulSetPartitionBlocked CauseID = "statefulset-partition-blocked"
+
+	// CauseReplicaSetCreateQuotaExceeded means a Deployment's own
+	// "Progressing" condition (or, when that condition is entirely absent,
+	// a Warning event on the Deployment itself) reads
+	// Reason=="ReplicaSetCreateError" with a message that names an
+	// exceeded ResourceQuota. Distinct from CauseQuotaExceeded: that cause
+	// reads a Reason=="FailedCreate" event on the ReplicaSet the pod would
+	// have belonged to; this one fires when the ReplicaSet itself was never
+	// created at all, so no such child object, and no such event, ever
+	// exists to read. Mechanism: deploymentutil.FailedRSCreateReason
+	// (k8s.io/kubernetes@v1.36.1, pkg/controller/deployment/sync.go, function
+	// getNewReplicaSet) sets this condition only when
+	// deploymentutil.HasProgressDeadline(d) is true (spec.progressDeadlineSeconds
+	// is set and not the documented "disable" sentinel math.MaxInt32); the
+	// same function unconditionally emits a Warning event with the same
+	// Reason on the Deployment regardless of that gate, which is why the
+	// event is read as a fallback when the condition itself cannot exist
+	// for a Deployment that disabled progress tracking entirely. Because
+	// rolling.go returns immediately on this error, before syncRolloutStatus
+	// can ever reach the ProgressDeadlineExceeded branch, this cause and
+	// CauseProgressDeadlineExceeded are mutually exclusive by construction
+	// (the same single condition only ever carries one Reason at a time).
+	CauseReplicaSetCreateQuotaExceeded CauseID = "replicaset-create-quota-exceeded"
+	// CauseReplicaSetCreateUndetermined means the same
+	// Reason=="ReplicaSetCreateError" signal as
+	// CauseReplicaSetCreateQuotaExceeded fired, but the message does not
+	// name an exceeded ResourceQuota. The Reason is genuinely generic:
+	// verified live on kind this session, a ValidatingAdmissionPolicy
+	// denying ReplicaSet creation produces the identical
+	// Reason=="ReplicaSetCreateError" condition and event with a message
+	// naming the policy and binding instead of a quota — this path is real
+	// and reachable, not a hypothetical fallback bucket.
+	CauseReplicaSetCreateUndetermined CauseID = "replicaset-create-undetermined"
 )

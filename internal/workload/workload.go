@@ -171,6 +171,15 @@ type Workload interface {
 	// yet exceeded", never "definitely not exceeded": callers must not confuse
 	// the two.
 	ProgressDeadlineExceeded() (message string, ok bool)
+	// ReplicaSetCreateError reports whether the controller's "Progressing"
+	// condition currently reads Reason=="ReplicaSetCreateError": the
+	// controller tried and failed to create a new ReplicaSet for the
+	// current pod template (quota exhaustion, an admission webhook, or
+	// another rejection — the reason string does not distinguish among
+	// them). ok=false means "condition not present, or currently reads
+	// something else", never "definitely healthy": the same convention
+	// already established by ProgressDeadlineExceeded/Paused.
+	ReplicaSetCreateError() (message string, ok bool)
 	// Paused reports spec.paused. A paused Deployment's controller takes no
 	// action at all: it does not create or update Pods, and Kubernetes
 	// itself freezes progressDeadlineSeconds while paused, so
@@ -389,6 +398,28 @@ const progressDeadlineExceededReason = "ProgressDeadlineExceeded"
 func (w *deploymentWorkload) ProgressDeadlineExceeded() (message string, ok bool) {
 	for _, c := range w.d.Status.Conditions {
 		if c.Type == appsv1.DeploymentProgressing && c.Reason == progressDeadlineExceededReason {
+			return c.Message, true
+		}
+	}
+	return "", false
+}
+
+// replicaSetCreateErrorReason is the Reason value written by the Deployment
+// controller to the "Progressing" condition when it fails to create a new
+// ReplicaSet for the current pod template (deploymentutil.FailedRSCreateReason
+// in k8s.io/kubernetes, which cannot be imported here: same class of stable,
+// observable-contract literal already cited for
+// progressDeadlineExceededReason above).
+const replicaSetCreateErrorReason = "ReplicaSetCreateError"
+
+// ReplicaSetCreateError reads the "Progressing" condition from the
+// Deployment Status, the same source as ProgressDeadlineExceeded, looking
+// for the distinct Reason the controller writes when it fails to create a
+// new ReplicaSet rather than when it times out waiting for one it already
+// created.
+func (w *deploymentWorkload) ReplicaSetCreateError() (message string, ok bool) {
+	for _, c := range w.d.Status.Conditions {
+		if c.Type == appsv1.DeploymentProgressing && c.Reason == replicaSetCreateErrorReason {
 			return c.Message, true
 		}
 	}

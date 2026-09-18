@@ -221,6 +221,13 @@ func TestFromStatefulSet_ProgressDeadlineExceeded_AlwaysNotApplicable(t *testing
 	}
 }
 
+func TestFromStatefulSet_ReplicaSetCreateError_AlwaysNotApplicable(t *testing.T) {
+	s := &appsv1.StatefulSet{}
+	if _, ok := workload.FromStatefulSet(s).ReplicaSetCreateError(); ok {
+		t.Fatal("StatefulSet has no ReplicaSet or Progressing condition: ok must always be false")
+	}
+}
+
 func statefulSetBase() *appsv1.StatefulSet {
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{Generation: 2},
